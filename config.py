@@ -6,20 +6,49 @@ config.py — Единый конфиг для всей платформы.
 """
 import os
 
-# === Telegram API (общий для всех аккаунтов) ================================
-API_ID = int(os.environ.get("TG_API_ID", 36091011))
-API_HASH = os.environ.get("TG_API_HASH", "72fa475b3b4f5124b9f165672dca423b")
-
 # === Пул аккаунтов ==========================================================
 # Каждый аккаунт = один session-файл = один телеграм-юзер.
+# У каждого аккаунта свои api_id / api_hash.
 # priority: 1 — основной, 2+ — резервы. Чем меньше — тем приоритетнее.
 # session: путь к .session файлу (без расширения), как в TelegramClient(session=...).
+# ВАЖНО: имена session-файлов нужно уточнить на сервере (ls ~/*.session).
 ACCOUNTS = [
-    {"name": "main",     "session": "rumyantsev_create_chat", "priority": 1},
-    # Раскомментируй и добавь реальные сессии:
-    # {"name": "backup_1", "session": "rumyantsev_backup",     "priority": 2},
-    # {"name": "backup_2", "session": "rumyantsev_backup_2",   "priority": 3},
-    # {"name": "backup_3", "session": "rumyantsev_backup_3",   "priority": 4},
+    {
+        "name": "main",
+        "session": "rumyantsev_create_chat",
+        "api_id": 36091011,
+        "api_hash": "72fa475b3b4f5124b9f165672dca423b",
+        "phone": "+79808625417",
+        "username": "rumyancev_alex",
+        "priority": 1,
+    },
+    {
+        "name": "backup_1",
+        "session": "rumPRodar",
+        "api_id": 30517734,
+        "api_hash": "3f7c45927d1eadc9bb8c1d2117eda432",
+        "phone": "+905053544048",
+        "username": "rumPRodar",
+        "priority": 2,
+    },
+    {
+        "name": "backup_2",
+        "session": "aleksrumi",
+        "api_id": 36215511,
+        "api_hash": "d48299050413bf020ec911bf74f7bf56",
+        "phone": "+18177669809",
+        "username": "aleksrumi",
+        "priority": 3,
+    },
+    {
+        "name": "backup_3",
+        "session": "ProdarAl",
+        "api_id": 38343394,
+        "api_hash": "a211f75e849a77558ca4fe54b41b2b2b",
+        "phone": "+99362724797",
+        "username": "ProdarAl",
+        "priority": 4,
+    },
 ]
 
 # === Порты (не менять — Make/n8n привязаны к ним) ============================

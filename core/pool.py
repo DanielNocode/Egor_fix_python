@@ -34,6 +34,8 @@ class AccountPool:
                 session=acc["session"],
                 priority=acc["priority"],
                 loop=self._loop,
+                api_id=acc["api_id"],
+                api_hash=acc["api_hash"],
             )
             self.bridges[name] = bridge
             self._sorted_names.append(name)

@@ -35,11 +35,14 @@ class TelethonBridge:
     STATUS_BANNED = "banned"
 
     def __init__(self, name: str, session: str, priority: int,
-                 loop: asyncio.AbstractEventLoop):
+                 loop: asyncio.AbstractEventLoop,
+                 api_id: int = None, api_hash: str = None):
         self.name = name
         self.session = session
         self.priority = priority
         self._loop = loop
+        self.api_id = api_id
+        self.api_hash = api_hash
 
         self.client: Optional[TelegramClient] = None
         self.self_user_id: Optional[int] = None
@@ -65,7 +68,7 @@ class TelethonBridge:
         logger.info("Starting bridge %s (session=%s)", self.name, self.session)
         try:
             self.client = TelegramClient(
-                self.session, config.API_ID, config.API_HASH,
+                self.session, self.api_id, self.api_hash,
                 loop=self._loop, catch_up=False,
             )
             started = self.client.start()
