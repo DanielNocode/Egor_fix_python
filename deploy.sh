@@ -2,7 +2,7 @@
 # deploy.sh — Полный деплой платформы Rumyantsev Telethon
 #
 # Запуск на сервере:
-#   cd /root/Egor_fix_python
+#   cd /home/Egor/telethon/rumyantsev
 #   bash deploy.sh
 #
 # Этапы:
