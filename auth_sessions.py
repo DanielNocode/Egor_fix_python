@@ -12,13 +12,19 @@ import asyncio
 import os
 import sys
 
-# Fix encoding for non-UTF-8 terminals
+# Fix encoding: always force UTF-8 with error handling on all streams
 import io
-if sys.stdout.encoding != "utf-8":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-if sys.stdin.encoding != "utf-8":
-    sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
+
+
+def safe_input(prompt=""):
+    """Read input safely, handling any encoding issues."""
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    raw = sys.stdin.buffer.readline()
+    return raw.decode("utf-8", errors="replace").strip()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import ACCOUNTS, SERVICE_TYPES
@@ -94,14 +100,14 @@ async def create_session(acc, svc, session_name):
             print(f"\nSending code to {acc['phone']}...")
             await client.send_code_request(acc["phone"])
 
-            code = input("Enter Telegram code: ").strip()
+            code = safe_input("Enter Telegram code: ")
 
             try:
                 await client.sign_in(acc["phone"], code)
             except Exception as e:
                 err_str = str(e)
                 if "Two-step verification" in err_str or "password" in err_str.lower():
-                    password = input("2FA password required: ").strip()
+                    password = safe_input("2FA password required: ")
                     try:
                         await client.sign_in(password=password)
                     except UnicodeDecodeError as ue:
@@ -158,7 +164,7 @@ async def main():
     for acc, svc, name in to_create:
         print(f"  - {acc['name']} / {svc} -> {name}.session")
 
-    answer = input("\nContinue? (y/n): ").strip().lower()
+    answer = safe_input("\nContinue? (y/n): ").lower()
     if answer != "y":
         print("Cancelled.")
         return
@@ -168,7 +174,7 @@ async def main():
             await create_session(acc, svc, name)
         except Exception as e:
             print(f"\nERROR creating {name}: {e}")
-            skip = input("Skip and continue? (y/n): ").strip().lower()
+            skip = safe_input("Skip and continue? (y/n): ").lower()
             if skip != "y":
                 print("Aborted.")
                 return
