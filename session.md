@@ -15,11 +15,12 @@
 - **API_ID:** 36091011
 - **API_HASH:** 72fa475b3b4f5124b9f165672dca423b
 
-| Скрипт | Сессия (.session) | Назначение |
-|---|---|---|
-| `create_chat_rumyantsev_webhook.py` | `rumyantsev_create_chat` | Создание чатов |
-| `send_media_rumyantsev_webhook.py` | `rumuantsev_media` | Отправка медиа |
-| `send_text_rumyantsev_webhook.py` | `rumyantsev_send_text` | Отправка текста |
+| Скрипт | Путь к скрипту | Сессия | Путь к сессии | Назначение |
+|---|---|---|---|---|
+| `create_chat_rumyantsev_webhook.py` | `/root/create_chat_rumyantsev_webhook.py` | `rumyantsev_create_chat` | `/root/rumyantsev_create_chat.session` | Создание чатов |
+| `send_media_rumyantsev_webhook.py` | `/root/send_media_rumyantsev_webhook.py` | `rumuantsev_media` | `/root/rumuantsev_media.session` | Отправка медиа |
+| `send_text_rumyantsev_webhook.py` | `/root/send_text_rumyantsev_webhook.py` | `rumyantsev_send_text` | `/root/rumyantsev_send_text.session` | Отправка текста |
+| `leave_chat_rumyantsev_webhook.py` | `/root/leave_chat_rumyantsev_webhook.py` | `rumyantsev_leave` | `/root/rumyantsev_leave.session` | Выход из чатов |
 
 **Статус:** ✅ Живой. Сессии media и send_text были залочены (скрипты активно работают).
 
@@ -33,9 +34,9 @@
 - **API_ID:** 30517734
 - **API_HASH:** 3f7c45927d1eadc9bb8c1d2117eda432
 
-| Скрипт | Сессия (.session) | Назначение |
-|---|---|---|
-| `create_chat_2_rumyantsev_webhook.py` | `rum_create_chat_2` | Создание чатов |
+| Скрипт | Путь к скрипту | Сессия | Путь к сессии | Назначение |
+|---|---|---|---|---|
+| `create_chat_2_rumyantsev_webhook.py` | `/root/create_chat_2_rumyantsev_webhook.py` | `rum_create_chat_2` | `/root/rum_create_chat_2.session` | Создание чатов |
 
 **Статус:** ✅ Живой.
 
@@ -49,10 +50,10 @@
 - **API_ID:** 36215511
 - **API_HASH:** d48299050413bf020ec911bf74f7bf56
 
-| Скрипт | Сессия (.session) | Назначение |
-|---|---|---|
-| `create_chat_5_rumyantsev_webhook.py` | `five_akk_rum` | Создание чатов |
-| `create_chat_3_rumyantsev_webhook.py` | `rum_create_chat_3` | Создание чатов |
+| Скрипт | Путь к скрипту | Сессия | Путь к сессии | Назначение |
+|---|---|---|---|---|
+| `create_chat_5_rumyantsev_webhook.py` | `/root/create_chat_5_rumyantsev_webhook.py` | `five_akk_rum` | `/root/five_akk_rum.session` | Создание чатов |
+| `create_chat_3_rumyantsev_webhook.py` | `/root/create_chat_3_rumyantsev_webhook.py` | `rum_create_chat_3` | `/root/rum_create_chat_3.session` | Создание чатов |
 
 **Статус:** ✅ Живой. Сессия `rum_create_chat_3` была залочена (скрипт активно работает). Оба скрипта используют один и тот же API_ID/HASH, предположительно один аккаунт.
 
@@ -66,25 +67,11 @@
 - **API_ID:** 38343394
 - **API_HASH:** a211f75e849a77558ca4fe54b41b2b2b
 
-| Скрипт | Сессия (.session) | Назначение |
-|---|---|---|
-| `create_chat_4_rumyantsev_webhook.py` | `rum_create_chat_4` | Создание чатов |
+| Скрипт | Путь к скрипту | Сессия | Путь к сессии | Назначение |
+|---|---|---|---|---|
+| `create_chat_4_rumyantsev_webhook.py` | `/root/create_chat_4_rumyantsev_webhook.py` | `rum_create_chat_4` | `/root/rum_create_chat_4.session` | Создание чатов |
 
 **Статус:** ✅ Живой.
-
----
-
-## Мёртвые сессии (NOT AUTHORIZED)
-
-- **API_ID:** 32292929
-- **API_HASH:** d125cce996bd21d5bba9eb522dbc2087
-
-| Скрипт | Сессия (.session) | Назначение | Статус |
-|---|---|---|---|
-| `send_media_2_rumyantsev_webhook.py` | `rumuantsev_media_2` | Отправка медиа | ⚠️ Требует переавторизации |
-| `send_text_2_rumyantsev_webhook.py` | `rumyantsev_send_text_2` | Отправка текста | ⚠️ Требует переавторизации |
-
-**Аккаунт не определён** — сессии протухли, `get_me()` недоступен. Для восстановления нужна повторная авторизация по номеру телефона.
 
 ---
 
@@ -101,14 +88,13 @@
 
 ## Сводная таблица: Скрипт → Аккаунт
 
-| Скрипт | Аккаунт | Телефон |
-|---|---|---|
-| `create_chat_rumyantsev_webhook.py` | RU основной | +79808625417 |
-| `send_media_rumyantsev_webhook.py` | RU основной | +79808625417 |
-| `send_text_rumyantsev_webhook.py` | RU основной | +79808625417 |
-| `create_chat_2_rumyantsev_webhook.py` | TR | +905053544048 |
-| `create_chat_3_rumyantsev_webhook.py` | US | +18177669809 |
-| `create_chat_4_rumyantsev_webhook.py` | TM | +99362724797 |
-| `create_chat_5_rumyantsev_webhook.py` | US | +18177669809 |
-| `send_media_2_rumyantsev_webhook.py` | ❌ мёртвая сессия | неизвестен |
-| `send_text_2_rumyantsev_webhook.py` | ❌ мёртвая сессия | неизвестен |
+| Скрипт | Путь | Аккаунт | Телефон | Сессия |
+|---|---|---|---|---|
+| `create_chat_rumyantsev_webhook.py` | `/root/` | RU основной | +79808625417 | `/root/rumyantsev_create_chat.session` |
+| `send_media_rumyantsev_webhook.py` | `/root/` | RU основной | +79808625417 | `/root/rumuantsev_media.session` |
+| `send_text_rumyantsev_webhook.py` | `/root/` | RU основной | +79808625417 | `/root/rumyantsev_send_text.session` |
+| `leave_chat_rumyantsev_webhook.py` | `/root/` | RU основной | +79808625417 | `/root/rumyantsev_leave.session` |
+| `create_chat_2_rumyantsev_webhook.py` | `/root/` | TR | +905053544048 | `/root/rum_create_chat_2.session` |
+| `create_chat_3_rumyantsev_webhook.py` | `/root/` | US | +18177669809 | `/root/rum_create_chat_3.session` |
+| `create_chat_4_rumyantsev_webhook.py` | `/root/` | TM | +99362724797 | `/root/rum_create_chat_4.session` |
+| `create_chat_5_rumyantsev_webhook.py` | `/root/` | US | +18177669809 | `/root/five_akk_rum.session` |
