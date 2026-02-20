@@ -13,10 +13,12 @@ import os
 import sys
 
 # Fix encoding for non-UTF-8 terminals
+import io
 if sys.stdout.encoding != "utf-8":
-    import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+if sys.stdin.encoding != "utf-8":
+    sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import ACCOUNTS, SERVICE_TYPES
@@ -100,7 +102,14 @@ async def create_session(acc, svc, session_name):
                 err_str = str(e)
                 if "Two-step verification" in err_str or "password" in err_str.lower():
                     password = input("2FA password required: ").strip()
-                    await client.sign_in(password=password)
+                    try:
+                        await client.sign_in(password=password)
+                    except UnicodeDecodeError as ue:
+                        print(f"\nENCODING ERROR: {ue}")
+                        print("The password likely contains non-ASCII characters (Cyrillic?).")
+                        print("Try setting terminal encoding: export LANG=en_US.UTF-8")
+                        print("Or check if the password was typed in the wrong keyboard layout.")
+                        raise
                 else:
                     raise
 
