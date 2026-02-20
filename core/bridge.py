@@ -36,8 +36,11 @@ class TelethonBridge:
 
     def __init__(self, name: str, session: str, priority: int,
                  loop: asyncio.AbstractEventLoop,
-                 api_id: int = None, api_hash: str = None):
-        self.name = name
+                 api_id: int = None, api_hash: str = None,
+                 account_name: str = "", service: str = ""):
+        self.name = name                  # "main:create_chat"
+        self.account_name = account_name  # "main"
+        self.service = service            # "create_chat"
         self.session = session
         self.priority = priority
         self._loop = loop
@@ -149,6 +152,8 @@ class TelethonBridge:
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "account_name": self.account_name,
+            "service": self.service,
             "session": self.session,
             "priority": self.priority,
             "status": self.status,

@@ -234,7 +234,7 @@ def send_text():
             pass
 
     try:
-        bridge = _router.pick_for_chat(chat_ref)
+        bridge = _router.pick_for_chat(chat_ref, service="send_text")
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 503
 
@@ -258,7 +258,7 @@ def send_text():
     except tl_errors.FloodWaitError as e:
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
         # Failover
-        fallback = _router.pool.get_next_healthy(exclude_name=bridge.name)
+        fallback = _router.pool.get_next_healthy("send_text", exclude_key=bridge.name)
         if fallback:
             try:
                 result = _run(
@@ -295,7 +295,7 @@ def send_text():
 
 @bp.route("/health", methods=["GET"])
 def health():
-    ok = _router is not None and _router.pool.get_best() is not None
+    ok = _router is not None and _router.pool.get_best("send_text") is not None
     return jsonify({"status": "ok" if ok else "not_ready"})
 
 
@@ -304,10 +304,11 @@ def stats():
     if _router is None:
         return jsonify({})
     pool = _router.pool
-    total_cache = sum(len(b._dialogs) for b in pool.bridges.values())
+    bridges = pool.get_healthy_list("send_text")
+    total_cache = sum(len(b._dialogs) for b in bridges)
     return jsonify({
         "cache_size": total_cache,
-        "accounts": pool.all_statuses(),
+        "accounts": pool.service_statuses("send_text"),
         "error_count": pool.total_errors,
         "operations_count": pool.total_operations,
     })
@@ -318,8 +319,9 @@ def reload_cache():
     if _router is None:
         return jsonify({"status": "error", "error": "not ready"}), 503
     try:
-        _run(_router.pool.reload_all_caches(), timeout=120)
-        total_cache = sum(len(b._dialogs) for b in _router.pool.bridges.values())
+        _run(_router.pool.reload_service_caches("send_text"), timeout=120)
+        bridges = _router.pool.get_healthy_list("send_text")
+        total_cache = sum(len(b._dialogs) for b in bridges)
         return jsonify({"status": "ok", "cache_size": total_cache})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500

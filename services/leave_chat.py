@@ -91,7 +91,7 @@ def leave_chat():
     chat_ref = _normalize_chat_ref(chat)
 
     try:
-        bridge = _router.pick_for_chat(chat_ref)
+        bridge = _router.pick_for_chat(chat_ref, service="leave_chat")
     except RuntimeError as e:
         return jsonify({"status": "error", "error": str(e)}), 503
 
@@ -113,5 +113,5 @@ def leave_chat():
 
 @bp.route("/health", methods=["GET"])
 def health():
-    ok = _router is not None and _router.pool.get_best() is not None
+    ok = _router is not None and _router.pool.get_best("leave_chat") is not None
     return jsonify({"status": "ok" if ok else "not_ready"})

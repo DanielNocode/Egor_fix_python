@@ -93,11 +93,11 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     @requires_auth
     def api_status():
         db_stats = _registry.get_stats()
-        healthy = len(_pool.get_healthy_list())
+        healthy = sum(1 for b in _pool.bridges.values() if b.is_healthy)
         total = len(_pool.bridges)
         return jsonify({
-            "healthy_accounts": healthy,
-            "total_accounts": total,
+            "healthy_bridges": healthy,
+            "total_bridges": total,
             "active_chats": db_stats["active_chats"],
             "total_operations": db_stats["total_operations"],
             "total_errors": db_stats["total_errors"],
@@ -142,9 +142,10 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
 
         if action == "reload_cache":
             if account:
+                # account = bridge key like "main:create_chat"
                 bridge = _pool.get(account)
                 if not bridge:
-                    return jsonify({"error": f"unknown account: {account}"}), 400
+                    return jsonify({"error": f"unknown bridge: {account}"}), 400
                 try:
                     _run(bridge.warmup_cache(), timeout=120)
                     return jsonify({"status": "ok", "cache_size": len(bridge._dialogs)})
@@ -166,7 +167,7 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                     if bridge.status == bridge.STATUS_ERROR:
                         bridge.status = bridge.STATUS_HEALTHY
                     return jsonify({"status": "ok"})
-            return jsonify({"error": "unknown account"}), 400
+            return jsonify({"error": "unknown bridge"}), 400
 
         elif action == "clear_flood":
             if account:
@@ -175,7 +176,7 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                     bridge.status = bridge.STATUS_HEALTHY
                     bridge.flood_until = 0
                     return jsonify({"status": "ok"})
-            return jsonify({"error": "unknown account or not in flood"}), 400
+            return jsonify({"error": "unknown bridge or not in flood"}), 400
 
         return jsonify({"error": "unknown action"}), 400
 
@@ -183,7 +184,7 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
 
     @app.route("/health")
     def api_health():
-        ok = _pool is not None and _pool.get_best() is not None
+        ok = _pool is not None and any(b.is_healthy for b in _pool.bridges.values())
         return jsonify({"status": "ok" if ok else "not_ready"})
 
     return app

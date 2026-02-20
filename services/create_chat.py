@@ -228,7 +228,7 @@ def create_chat():
         return jsonify({"error": "usernames (array) is required"}), 400
 
     try:
-        bridge = _router.pick_for_create()
+        bridge = _router.pick_for_create(service="create_chat")
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 503
 
@@ -245,7 +245,7 @@ def create_chat():
         chat_id = result.get("chat_id", "")
         if chat_id:
             _router.registry.assign(
-                chat_id, bridge.name,
+                chat_id, bridge.account_name,
                 title=title,
                 invite_link=result.get("invite_link") or "",
             )
@@ -256,7 +256,7 @@ def create_chat():
         _router.handle_error(bridge, e, "", "create_chat")
 
         # Попробовать failover
-        fallback = _router.pool.get_next_healthy(exclude_name=bridge.name)
+        fallback = _router.pool.get_next_healthy("create_chat", exclude_key=bridge.name)
         if fallback:
             try:
                 logger.warning("create_chat failover: %s → %s", bridge.name, fallback.name)
@@ -271,7 +271,7 @@ def create_chat():
                     chat_id = result.get("chat_id", "")
                     if chat_id:
                         _router.registry.assign(
-                            chat_id, fallback.name,
+                            chat_id, fallback.account_name,
                             title=title,
                             invite_link=result.get("invite_link") or "",
                         )
