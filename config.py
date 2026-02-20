@@ -37,8 +37,9 @@ ACCOUNTS = [
         "priority": 2,
         "sessions": {
             "create_chat": "rum_create_chat_2",
-            # send_text, send_media, leave_chat — сессии не созданы.
-            # Добавить после интерактивной авторизации (см. DEPLOYMENT_PLAN.md, Фаза 3).
+            "send_text":   "rum_send_text_2",
+            "send_media":  "rum_media_2",
+            "leave_chat":  "rum_leave_2",
         },
     },
     {
@@ -50,7 +51,9 @@ ACCOUNTS = [
         "priority": 3,
         "sessions": {
             "create_chat": "rum_create_chat_3",
-            # send_text, send_media, leave_chat — сессии не созданы.
+            "send_text":   "rum_send_text_3",
+            "send_media":  "rum_media_3",
+            "leave_chat":  "rum_leave_3",
         },
     },
     {
@@ -62,7 +65,9 @@ ACCOUNTS = [
         "priority": 4,
         "sessions": {
             "create_chat": "rum_create_chat_4",
-            # send_text, send_media, leave_chat — сессии не созданы.
+            "send_text":   "rum_send_text_4",
+            "send_media":  "rum_media_4",
+            "leave_chat":  "rum_leave_4",
         },
     },
 ]
