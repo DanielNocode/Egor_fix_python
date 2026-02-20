@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telethon Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Telethon Webhook Monitor</h1>
+        <div class="header-actions">
+            <span id="last-update" class="muted"></span>
+            <button onclick="refreshAll()" class="btn btn-sm">Refresh</button>
+        </div>
+    </header>
+
+    <!-- ALERTS -->
+    <div id="alerts-bar" class="alerts-bar hidden"></div>
+
+    <!-- SERVICE STATUS CARDS -->
+    <section class="cards">
+        <div class="card" id="card-send_text">
+            <div class="card-header">
+                <span class="status-dot" id="dot-send_text"></span>
+                <h2>send_text</h2>
+                <span class="port-badge">:5022</span>
+            </div>
+            <div class="card-body">
+                <div class="stat-row"><span class="label">Status</span><span id="state-send_text">-</span></div>
+                <div class="stat-row"><span class="label">Uptime</span><span id="uptime-send_text">-</span></div>
+                <div class="stat-row"><span class="label">Memory</span><span id="mem-send_text">-</span></div>
+                <div class="stat-row"><span class="label">CPU</span><span id="cpu-send_text">-</span></div>
+                <div class="stat-row"><span class="label">Cache</span><span id="cache-send_text">-</span></div>
+                <div class="stat-row"><span class="label">Errors</span><span id="errors-send_text">-</span></div>
+            </div>
+            <div class="card-controls">
+                <button onclick="controlService('send_text','start')" class="btn btn-green btn-sm">Start</button>
+                <button onclick="controlService('send_text','stop')" class="btn btn-red btn-sm">Stop</button>
+                <button onclick="controlService('send_text','restart')" class="btn btn-blue btn-sm">Restart</button>
+                <button onclick="controlService('send_text','reload_cache')" class="btn btn-sm">Reload Cache</button>
+            </div>
+        </div>
+
+        <div class="card" id="card-send_media">
+            <div class="card-header">
+                <span class="status-dot" id="dot-send_media"></span>
+                <h2>send_media</h2>
+                <span class="port-badge">:5023</span>
+            </div>
+            <div class="card-body">
+                <div class="stat-row"><span class="label">Status</span><span id="state-send_media">-</span></div>
+                <div class="stat-row"><span class="label">Uptime</span><span id="uptime-send_media">-</span></div>
+                <div class="stat-row"><span class="label">Memory</span><span id="mem-send_media">-</span></div>
+                <div class="stat-row"><span class="label">CPU</span><span id="cpu-send_media">-</span></div>
+                <div class="stat-row"><span class="label">Cache</span><span id="cache-send_media">-</span></div>
+                <div class="stat-row"><span class="label">Errors</span><span id="errors-send_media">-</span></div>
+            </div>
+            <div class="card-controls">
+                <button onclick="controlService('send_media','start')" class="btn btn-green btn-sm">Start</button>
+                <button onclick="controlService('send_media','stop')" class="btn btn-red btn-sm">Stop</button>
+                <button onclick="controlService('send_media','restart')" class="btn btn-blue btn-sm">Restart</button>
+                <button onclick="controlService('send_media','reload_cache')" class="btn btn-sm">Reload Cache</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- GLOBAL ACTIONS -->
+    <section class="global-actions">
+        <button onclick="clearFloodWait()" class="btn btn-red">Clear Flood Wait (stop 5min + restart)</button>
+        <button onclick="runDiagnostics()" class="btn btn-blue">Diagnostics</button>
+    </section>
+
+    <!-- DIAGNOSTICS REPORT -->
+    <section id="diagnostics-section" class="hidden">
+        <h2>Diagnostics Report</h2>
+        <div id="diagnostics-output" class="log-viewer"></div>
+    </section>
+
+    <!-- LOGS SECTION -->
+    <section class="logs-section">
+        <h2>Logs</h2>
+        <div class="log-controls">
+            <div class="log-filters">
+                <select id="log-service">
+                    <option value="both">Both services</option>
+                    <option value="send_text">send_text</option>
+                    <option value="send_media">send_media</option>
+                </select>
+                <select id="log-mode">
+                    <option value="errors">Errors only</option>
+                    <option value="full">Full log</option>
+                </select>
+                <input type="text" id="log-search" placeholder="Search..." class="log-search-input">
+                <input type="date" id="log-date-from" title="Date from">
+                <input type="date" id="log-date-to" title="Date to">
+                <select id="log-error-type">
+                    <option value="">All error types</option>
+                    <option value="PersistentTimestamp">PersistentTimestamp</option>
+                    <option value="Cannot resolve">Cannot resolve</option>
+                    <option value="FloodWait">FloodWait</option>
+                    <option value="ValueError">ValueError</option>
+                    <option value="ConnectionError">ConnectionError</option>
+                </select>
+            </div>
+            <div class="log-actions">
+                <button onclick="fetchLogs()" class="btn btn-sm">Refresh Logs</button>
+                <button onclick="copyLogs()" class="btn btn-sm">Copy</button>
+                <button onclick="downloadLogs()" class="btn btn-sm">Download</button>
+                <label class="auto-refresh-label">
+                    <input type="checkbox" id="log-auto-refresh" checked> Auto (30s)
+                </label>
+            </div>
+        </div>
+        <div id="log-viewer" class="log-viewer"></div>
+    </section>
+
+    <!-- HEALTH HISTORY -->
+    <section class="health-section">
+        <h2>Health Check History (24h)</h2>
+        <div id="health-history" class="health-grid"></div>
+    </section>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

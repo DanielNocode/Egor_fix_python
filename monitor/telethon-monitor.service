@@ -1,0 +1,16 @@
+[Unit]
+Description=Telethon Webhook Monitor Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/monitor
+Environment=MONITOR_USER=admin
+Environment=MONITOR_PASS=telethon2026
+ExecStart=/root/telethon_env/bin/python /root/monitor/monitor_app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

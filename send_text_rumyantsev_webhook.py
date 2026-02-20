@@ -13,6 +13,7 @@ import asyncio
 import threading
 import time
 import logging
+import collections
 from typing import Any, Dict, List, Optional
 
 from flask import Flask, request, jsonify
@@ -24,6 +25,7 @@ from telethon.utils import get_peer_id
 API_ID = 36091011
 API_HASH = "72fa475b3b4f5124b9f165672dca423b"
 SESSION_PATH = "rumyantsev_send_text"
+CACHE_WARMUP_INTERVAL = 1800  # 30 minutes
 
 # === RETRY CONFIG ===
 MAX_RETRIES = 3
@@ -44,6 +46,18 @@ logger = logging.getLogger("send_text_rumyantsev")
 _loop = asyncio.new_event_loop()
 _client: Optional[TelegramClient] = None
 _self_user_id: Optional[int] = None
+_DIALOGS_BY_ID: Dict[int, Any] = {}
+
+# === STATS ===
+_start_time: float = time.time()
+_error_count: int = 0
+_last_errors: collections.deque = collections.deque(maxlen=10)
+
+
+def _record_error(err: str):
+    global _error_count
+    _error_count += 1
+    _last_errors.append({"ts": time.time(), "error": err})
 
 # === ВСПОМОГАТЕЛЬНОЕ =====================================================
 
@@ -161,20 +175,63 @@ async def _find_client_in_chat(client: TelegramClient,
 
     return None
 
+async def _warmup_dialog_cache(client: TelegramClient):
+    """Load all dialogs into _DIALOGS_BY_ID keyed by their full Telegram IDs."""
+    _DIALOGS_BY_ID.clear()
+    async for d in client.iter_dialogs():
+        ent = d.entity
+        uid = getattr(ent, "id", None)
+        if uid is not None:
+            if hasattr(ent, 'broadcast') or hasattr(ent, 'megagroup'):
+                full_id = -1000000000000 - uid
+                _DIALOGS_BY_ID[full_id] = ent
+            elif hasattr(ent, 'title') and not hasattr(ent, 'username'):
+                _DIALOGS_BY_ID[-uid] = ent
+            else:
+                _DIALOGS_BY_ID[uid] = ent
+            # Also store by peer_id for fast lookup
+            try:
+                pid = get_peer_id(ent)
+                if pid not in _DIALOGS_BY_ID:
+                    _DIALOGS_BY_ID[pid] = ent
+            except Exception:
+                pass
+
+
 async def _get_chat_entity(client: TelegramClient, chat: Any) -> Any:
+    # 1. Try direct API resolve
     try:
         return await client.get_entity(chat)
     except ValueError:
-        async for dialog in client.iter_dialogs(limit=200):
-            if isinstance(chat, int):
-                dialog_id = get_peer_id(dialog.entity)
-                if dialog.entity.id == chat or dialog_id == chat:
-                    return dialog.entity
-            elif isinstance(chat, str):
-                if hasattr(dialog.entity, 'username') and dialog.entity.username:
-                    if dialog.entity.username == chat.lstrip('@'):
-                        return dialog.entity
-        raise ValueError(f"Не удалось найти чат {chat} в диалогах")
+        pass
+
+    # 2. Search in warm cache (no iter_dialogs call)
+    if isinstance(chat, int):
+        ent = _DIALOGS_BY_ID.get(chat)
+        if ent is not None:
+            return ent
+        # Try matching by raw entity id
+        for cached_ent in _DIALOGS_BY_ID.values():
+            cached_id = getattr(cached_ent, "id", None)
+            if cached_id == chat:
+                return cached_ent
+            try:
+                if get_peer_id(cached_ent) == chat:
+                    return cached_ent
+            except Exception:
+                pass
+    elif isinstance(chat, str):
+        uname = chat.lstrip('@')
+        for cached_ent in _DIALOGS_BY_ID.values():
+            if hasattr(cached_ent, 'username') and cached_ent.username:
+                if cached_ent.username == uname:
+                    return cached_ent
+
+    logger.warning(
+        f"Cannot find chat {chat} in cache ({len(_DIALOGS_BY_ID)} entries). "
+        "Will NOT re-fetch dialogs (use /reload_cache or wait for periodic warmup)."
+    )
+    raise ValueError(f"Не удалось найти чат {chat} в диалогах")
 
 async def _send_text_impl(client: TelegramClient,
                           chat: Any,
@@ -284,6 +341,29 @@ def health():
     ok = _client is not None
     return jsonify({"status": "ok" if ok else "not_ready"})
 
+
+@app.route("/stats", methods=["GET"])
+def stats():
+    return jsonify({
+        "cache_size": len(_DIALOGS_BY_ID),
+        "uptime_seconds": round(time.time() - _start_time, 1),
+        "error_count": _error_count,
+        "last_errors": list(_last_errors),
+    })
+
+
+@app.route("/reload_cache", methods=["POST"])
+def reload_cache():
+    if _client is None:
+        return jsonify({"status": "error", "error": "client not ready"}), 503
+    try:
+        run_coro(_warmup_dialog_cache(_client), timeout=120)
+        return jsonify({"status": "ok", "cache_size": len(_DIALOGS_BY_ID)})
+    except Exception as e:
+        _record_error(f"reload_cache: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 @app.route("/send_text", methods=["POST"])
 def send_text():
     if _client is None:
@@ -326,9 +406,11 @@ def send_text():
         ), timeout=120)
         return jsonify(result)
     except tl_errors.FloodWaitError as e:
+        _record_error(f"FloodWait: {e.seconds}s")
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
     except Exception as e:
         import traceback
+        _record_error(f"{type(e).__name__}: {e}")
         logger.error(f"send_text failed: {type(e).__name__}: {e}")
         return jsonify({
             "status": "error",
@@ -336,17 +418,35 @@ def send_text():
             "traceback": traceback.format_exc()
         }), 500
 
+# === PERIODIC CACHE WARMUP ================================================
+
+async def _periodic_cache_warmup():
+    """Re-warm dialog cache every CACHE_WARMUP_INTERVAL seconds."""
+    while True:
+        await asyncio.sleep(CACHE_WARMUP_INTERVAL)
+        try:
+            logger.info("Periodic cache warmup started...")
+            await _warmup_dialog_cache(_client)
+            logger.info(f"Periodic cache warmup done, {len(_DIALOGS_BY_ID)} entries")
+        except Exception as e:
+            _record_error(f"periodic_warmup: {e}")
+            logger.error(f"Periodic cache warmup failed: {e}")
+
+
 # === ЗАПУСК TELETHON В ФОНЕ ==============================================
 
 def telethon_thread():
     global _client
     asyncio.set_event_loop(_loop)
-    _client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
+    _client = TelegramClient(SESSION_PATH, API_ID, API_HASH, catch_up=False)
     started = _client.start()
     if asyncio.iscoroutine(started):
         _loop.run_until_complete(started)
 
-    logger.info("Telethon client started")
+    _loop.run_until_complete(_warmup_dialog_cache(_client))
+    _loop.create_task(_periodic_cache_warmup())
+
+    logger.info("Telethon client started, dialog cache warmed up")
     _loop.run_forever()
 
 threading.Thread(target=telethon_thread, name="telethon-loop", daemon=True).start()
