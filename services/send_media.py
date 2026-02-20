@@ -227,7 +227,7 @@ def send_media():
 
     # Выбираем аккаунт
     try:
-        bridge = _router.pick_for_recipient(user_id=user_id, username=username)
+        bridge = _router.pick_for_recipient(service="send_media", user_id=user_id, username=username)
     except RuntimeError as e:
         return jsonify({"status": "error", "error": str(e)}), 503
 
@@ -253,7 +253,7 @@ def send_media():
         chat_str = str(user_id) if user_id else (username or "")
         _router.handle_error(bridge, e, chat_str, "send_media")
         # Failover
-        fallback = _router.pool.get_next_healthy(exclude_name=bridge.name)
+        fallback = _router.pool.get_next_healthy("send_media", exclude_key=bridge.name)
         if fallback:
             try:
                 entity, msgs = _run(
@@ -300,7 +300,7 @@ def send_media():
 
 @bp.route("/health", methods=["GET"])
 def health():
-    ok = _router is not None and _router.pool.get_best() is not None
+    ok = _router is not None and _router.pool.get_best("send_media") is not None
     return jsonify({"status": "ok" if ok else "not_ready"})
 
 
@@ -309,10 +309,11 @@ def stats():
     if _router is None:
         return jsonify({})
     pool = _router.pool
-    total_cache = sum(len(b._dialogs) for b in pool.bridges.values())
+    bridges = pool.get_healthy_list("send_media")
+    total_cache = sum(len(b._dialogs) for b in bridges)
     return jsonify({
         "cache_size": total_cache,
-        "accounts": pool.all_statuses(),
+        "accounts": pool.service_statuses("send_media"),
         "error_count": pool.total_errors,
         "operations_count": pool.total_operations,
     })
@@ -323,8 +324,9 @@ def reload_cache():
     if _router is None:
         return jsonify({"status": "error", "error": "not ready"}), 503
     try:
-        _run(_router.pool.reload_all_caches(), timeout=120)
-        total_cache = sum(len(b._dialogs) for b in _router.pool.bridges.values())
+        _run(_router.pool.reload_service_caches("send_media"), timeout=120)
+        bridges = _router.pool.get_healthy_list("send_media")
+        total_cache = sum(len(b._dialogs) for b in bridges)
         return jsonify({"status": "ok", "cache_size": total_cache})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
