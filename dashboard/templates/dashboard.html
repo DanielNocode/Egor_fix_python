@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telethon Platform</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <header>
+        <h1>Telethon Platform</h1>
+        <div class="header-right">
+            <span id="last-update" class="muted"></span>
+            <button onclick="refreshAll()" class="btn btn-sm">Refresh</button>
+        </div>
+    </header>
+
+    <!-- ALERTS -->
+    <div id="alerts-bar" class="alerts-bar hidden"></div>
+
+    <!-- SUMMARY -->
+    <section class="summary-row" id="summary-row">
+        <div class="summary-card">
+            <div class="summary-value" id="s-healthy">-</div>
+            <div class="summary-label">Healthy Accounts</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-value" id="s-chats">-</div>
+            <div class="summary-label">Active Chats</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-value" id="s-ops">-</div>
+            <div class="summary-label">Operations</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-value" id="s-errors">-</div>
+            <div class="summary-label">Errors</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-value" id="s-failovers">-</div>
+            <div class="summary-label">Failovers</div>
+        </div>
+    </section>
+
+    <!-- ACCOUNTS -->
+    <section>
+        <h2>Accounts</h2>
+        <div class="cards" id="accounts-grid"></div>
+    </section>
+
+    <!-- TABS: Chats / Operations / Failovers -->
+    <section class="tabs-section">
+        <div class="tab-buttons">
+            <button class="tab-btn active" data-tab="chats">Chats</button>
+            <button class="tab-btn" data-tab="operations">Operations</button>
+            <button class="tab-btn" data-tab="failovers">Failovers</button>
+        </div>
+
+        <div class="tab-content active" id="tab-chats">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Chat ID</th>
+                            <th>Title</th>
+                            <th>Account</th>
+                            <th>Created</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="chats-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-operations">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Account</th>
+                            <th>Chat</th>
+                            <th>Operation</th>
+                            <th>Status</th>
+                            <th>Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ops-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-failovers">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Chat</th>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fo-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>
