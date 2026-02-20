@@ -47,6 +47,8 @@ _loop = asyncio.new_event_loop()
 _client: Optional[TelegramClient] = None
 _self_user_id: Optional[int] = None
 _DIALOGS_BY_ID: Dict[int, Any] = {}
+_last_mini_refresh: float = 0.0  # rate-limit for mini cache refresh
+MINI_REFRESH_COOLDOWN = 30  # seconds between mini-refresh attempts
 
 # === STATS ===
 _start_time: float = time.time()
@@ -198,19 +200,50 @@ async def _warmup_dialog_cache(client: TelegramClient):
                 pass
 
 
-async def _get_chat_entity(client: TelegramClient, chat: Any) -> Any:
-    # 1. Try direct API resolve
+def _add_entity_to_cache(ent):
+    """Add a single entity to the cache using the same key logic as full warmup."""
+    uid = getattr(ent, "id", None)
+    if uid is None:
+        return
+    if hasattr(ent, 'broadcast') or hasattr(ent, 'megagroup'):
+        full_id = -1000000000000 - uid
+        _DIALOGS_BY_ID[full_id] = ent
+    elif hasattr(ent, 'title') and not hasattr(ent, 'username'):
+        _DIALOGS_BY_ID[-uid] = ent
+    else:
+        _DIALOGS_BY_ID[uid] = ent
     try:
-        return await client.get_entity(chat)
-    except ValueError:
+        pid = get_peer_id(ent)
+        if pid not in _DIALOGS_BY_ID:
+            _DIALOGS_BY_ID[pid] = ent
+    except Exception:
         pass
 
-    # 2. Search in warm cache (no iter_dialogs call)
+
+async def _mini_refresh_cache(client: TelegramClient):
+    """Fetch last 100 dialogs and add them to cache. Lightweight, no flood risk."""
+    global _last_mini_refresh
+    now = time.time()
+    if now - _last_mini_refresh < MINI_REFRESH_COOLDOWN:
+        return
+    _last_mini_refresh = now
+    added = 0
+    try:
+        async for d in client.iter_dialogs(limit=100):
+            ent = d.entity
+            _add_entity_to_cache(ent)
+            added += 1
+        logger.info(f"Mini cache refresh: added/updated {added} dialogs, total cache: {len(_DIALOGS_BY_ID)}")
+    except Exception as e:
+        logger.warning(f"Mini cache refresh failed: {e}")
+
+
+def _find_in_cache(chat: Any):
+    """Search the cache for the given chat. Returns entity or None."""
     if isinstance(chat, int):
         ent = _DIALOGS_BY_ID.get(chat)
         if ent is not None:
             return ent
-        # Try matching by raw entity id
         for cached_ent in _DIALOGS_BY_ID.values():
             cached_id = getattr(cached_ent, "id", None)
             if cached_id == chat:
@@ -226,10 +259,37 @@ async def _get_chat_entity(client: TelegramClient, chat: Any) -> Any:
             if hasattr(cached_ent, 'username') and cached_ent.username:
                 if cached_ent.username == uname:
                     return cached_ent
+    return None
+
+
+async def _get_chat_entity(client: TelegramClient, chat: Any) -> Any:
+    # 1. Try direct API resolve (works if Telethon already has access_hash)
+    try:
+        return await client.get_entity(chat)
+    except (ValueError, KeyError):
+        pass
+
+    # 2. Search in warm cache
+    cached = _find_in_cache(chat)
+    if cached is not None:
+        return cached
+
+    # 3. Mini-refresh: fetch last 100 dialogs (catches newly created chats)
+    await _mini_refresh_cache(client)
+    cached = _find_in_cache(chat)
+    if cached is not None:
+        logger.info(f"Chat {chat} found after mini cache refresh")
+        return cached
+
+    # 4. Try direct API resolve again (mini-refresh populates Telethon's internal cache)
+    try:
+        return await client.get_entity(chat)
+    except (ValueError, KeyError):
+        pass
 
     logger.warning(
-        f"Cannot find chat {chat} in cache ({len(_DIALOGS_BY_ID)} entries). "
-        "Will NOT re-fetch dialogs (use /reload_cache or wait for periodic warmup)."
+        f"Cannot find chat {chat} in cache ({len(_DIALOGS_BY_ID)} entries) "
+        "even after mini-refresh."
     )
     raise ValueError(f"Не удалось найти чат {chat} в диалогах")
 

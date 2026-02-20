@@ -49,6 +49,8 @@ logger = logging.getLogger("send_media_rumyantsev")
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _client: Optional[TelegramClient] = None
 _DIALOGS_BY_ID: Dict[int, Any] = {}
+_last_mini_refresh: float = 0.0  # rate-limit for mini cache refresh
+MINI_REFRESH_COOLDOWN = 30  # seconds between mini-refresh attempts
 
 # -------------------- STATS --------------------
 _start_time: float = time.time()
@@ -172,11 +174,45 @@ async def _warmup_dialog_cache(client: TelegramClient):
             else:
                 _DIALOGS_BY_ID[uid] = ent
 
+def _add_entity_to_cache(ent):
+    """Add a single entity to the cache using the same key logic as full warmup."""
+    uid = getattr(ent, "id", None)
+    if uid is None:
+        return
+    if hasattr(ent, 'broadcast') or hasattr(ent, 'megagroup'):
+        full_id = -1000000000000 - uid
+        _DIALOGS_BY_ID[full_id] = ent
+    elif hasattr(ent, 'title') and not hasattr(ent, 'username'):
+        _DIALOGS_BY_ID[-uid] = ent
+    else:
+        _DIALOGS_BY_ID[uid] = ent
+
+
+async def _mini_refresh_cache(client: TelegramClient):
+    """Fetch last 100 dialogs and add them to cache. Lightweight, no flood risk."""
+    global _last_mini_refresh
+    now = time.time()
+    if now - _last_mini_refresh < MINI_REFRESH_COOLDOWN:
+        return
+    _last_mini_refresh = now
+    added = 0
+    try:
+        async for d in client.iter_dialogs(limit=100):
+            ent = d.entity
+            _add_entity_to_cache(ent)
+            added += 1
+        logger.info(f"Mini cache refresh: added/updated {added} dialogs, total cache: {len(_DIALOGS_BY_ID)}")
+    except Exception as e:
+        logger.warning(f"Mini cache refresh failed: {e}")
+
+
 async def resolve_entity_by_id(client: TelegramClient, uid: int):
+    # 1. Check cache
     ent = _DIALOGS_BY_ID.get(int(uid))
     if ent is not None:
         return ent
 
+    # 2. Try direct API resolve (works if Telethon has access_hash)
     try:
         if uid > 0:
             return await client.get_entity(PeerUser(uid))
@@ -193,9 +229,28 @@ async def resolve_entity_by_id(client: TelegramClient, uid: int):
     except Exception:
         pass
 
+    # 3. Mini-refresh: fetch last 100 dialogs (catches newly created chats)
+    await _mini_refresh_cache(client)
+    ent = _DIALOGS_BY_ID.get(int(uid))
+    if ent is not None:
+        logger.info(f"Entity uid={uid} found after mini cache refresh")
+        return ent
+
+    # 4. Try API resolve again (mini-refresh populates Telethon's internal cache)
+    try:
+        if uid > 0:
+            return await client.get_entity(PeerUser(uid))
+        elif uid < -1000000000000:
+            channel_id = -uid - 1000000000000
+            return await client.get_entity(PeerChannel(channel_id))
+        else:
+            return await client.get_entity(PeerChat(-uid))
+    except Exception:
+        pass
+
     logger.warning(
-        f"Cannot resolve entity uid={uid}, cache has {len(_DIALOGS_BY_ID)} entries. "
-        "Will NOT re-warmup cache here (use /reload_cache or wait for periodic warmup)."
+        f"Cannot resolve entity uid={uid}, cache has {len(_DIALOGS_BY_ID)} entries "
+        "even after mini-refresh."
     )
     raise ValueError(
         f"Cannot resolve entity from user_id={uid}. "
