@@ -16,7 +16,7 @@ API_HASH = "72fa475b3b4f5124b9f165672dca423b"
 SESSION_PATH = "rumyantsev_create_chat"  # сессия нужного аккаунта
 
 SALEBOT_CALLBACK_URL = "https://chatter.salebot.pro/api/17fb55a49883fb26bef73b6429fc4cf1/tg_callback"
-SALEBOT_GROUP_ID = "alex_rumyansev_bot"
+SALEBOT_GROUP_ID = "alex_rumhelp_bot"
 
 # === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ================================================
 app = Flask(__name__)
