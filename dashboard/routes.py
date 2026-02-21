@@ -207,13 +207,36 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                 )
                 if was_added:
                     added += 1
+                    _registry.log_operation(
+                        bridge.account_name, chat_id,
+                        "sync", "ok",
+                        detail=f"Импортирован из кэша ({title})",
+                    )
                 else:
                     skipped += 1
+
+        # Бэкфил: для чатов без единой операции записываем "sync"
+        backfilled = 0
+        conn = _registry._get_conn()
+        rows = conn.execute(
+            """SELECT ca.chat_id, ca.account_name, ca.title
+               FROM chat_assignments ca
+               LEFT JOIN operations_log ol ON ca.chat_id = ol.chat_id
+               WHERE ol.id IS NULL AND ca.status = 'active'"""
+        ).fetchall()
+        for row in rows:
+            _registry.log_operation(
+                row["account_name"], row["chat_id"],
+                "sync", "ok",
+                detail=f"Импортирован из кэша ({row['title'] or ''})",
+            )
+            backfilled += 1
 
         return jsonify({
             "status": "ok",
             "added": added,
             "skipped": skipped,
+            "backfilled": backfilled,
             "total_seen": len(seen_ids),
         })
 
