@@ -115,6 +115,7 @@
     <section class="tabs-section">
         <div class="tab-buttons">
             <button class="tab-btn active" data-tab="chats">Чаты</button>
+            <button class="tab-btn" data-tab="callbacks">Коллбеки</button>
             <button class="tab-btn" data-tab="failovers">Переключения</button>
             <button class="tab-btn" data-tab="failed">Неудачные запросы</button>
             <button class="tab-btn" data-tab="logs">Системные логи</button>
@@ -140,6 +141,46 @@
                 </table>
             </div>
             <div id="chats-more"></div>
+        </div>
+
+        <!-- TAB: Callbacks -->
+        <div class="tab-content" id="tab-callbacks">
+            <div class="cb-layout">
+                <div class="cb-form-card">
+                    <h3 class="cb-form-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                        Отправить инвайт-ссылку
+                    </h3>
+                    <div class="cb-field">
+                        <label for="cb-user-id">Telegram ID пользователя</label>
+                        <input type="text" id="cb-user-id" placeholder="например 8234045237">
+                    </div>
+                    <div class="cb-field">
+                        <label for="cb-invite-link">Инвайт-ссылка</label>
+                        <input type="text" id="cb-invite-link" placeholder="https://t.me/+...">
+                    </div>
+                    <div class="cb-field">
+                        <label for="cb-comment">Комментарий <span class="muted">(необязательно)</span></label>
+                        <input type="text" id="cb-comment" placeholder="Название чата, имя клиента...">
+                    </div>
+                    <div class="cb-actions">
+                        <button onclick="sendCallback()" class="btn btn-primary" id="cb-send-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                            Отправить
+                        </button>
+                    </div>
+                    <div id="cb-result" class="cb-result" style="display:none"></div>
+                </div>
+                <div class="cb-history-card">
+                    <h3 class="cb-form-title">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+                        История отправок
+                    </h3>
+                    <div class="cb-history-list" id="cb-history">
+                        <div class="cb-history-empty">Пока ничего не отправлялось</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- TAB: Failovers -->

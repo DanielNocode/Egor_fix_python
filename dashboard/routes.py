@@ -402,6 +402,40 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
         _registry.delete_failed_request(int(req_id))
         return jsonify({"status": "ok"})
 
+    # --- API: salebot callback ---
+
+    @app.route("/api/send_salebot_callback", methods=["POST"])
+    @requires_auth
+    def api_send_salebot_callback():
+        data = request.get_json(force=True) or {}
+        user_id = str(data.get("user_id", "")).strip()
+        invite_link = str(data.get("invite_link", "")).strip()
+        if not user_id or not invite_link:
+            return jsonify({"error": "user_id and invite_link are required"}), 400
+
+        payload = {
+            "message": "send_invite_link",
+            "user_id": user_id,
+            "group_id": config.SALEBOT_GROUP_ID,
+            "tg_business": 1,
+            "invite_link": invite_link,
+        }
+
+        try:
+            resp = http_requests.post(
+                config.SALEBOT_CALLBACK_URL,
+                json=payload,
+                timeout=15,
+            )
+            return jsonify({
+                "status": "ok" if resp.status_code < 400 else "error",
+                "response_code": resp.status_code,
+                "response_body": resp.text[:300],
+                "payload_sent": payload,
+            })
+        except Exception as e:
+            return jsonify({"status": "error", "error": str(e)}), 500
+
     # --- API: health ---
 
     @app.route("/health")

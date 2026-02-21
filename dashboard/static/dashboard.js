@@ -735,6 +735,111 @@ function saveAndRetry() {
     });
 }
 
+/* ========== SALEBOT CALLBACKS ========== */
+
+let _cbHistory = [];
+
+function sendCallback() {
+    const userId = document.getElementById('cb-user-id').value.trim();
+    const inviteLink = document.getElementById('cb-invite-link').value.trim();
+    const comment = document.getElementById('cb-comment').value.trim();
+    const resultEl = document.getElementById('cb-result');
+    const btn = document.getElementById('cb-send-btn');
+
+    if (!userId || !inviteLink) {
+        resultEl.className = 'cb-result cb-result-error';
+        resultEl.textContent = 'Заполните ID пользователя и инвайт-ссылку';
+        resultEl.style.display = 'block';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Отправка...';
+    resultEl.style.display = 'none';
+
+    fetch('/api/send_salebot_callback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, invite_link: inviteLink}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg> Отправить';
+
+        if (data.status === 'ok') {
+            resultEl.className = 'cb-result cb-result-ok';
+            resultEl.textContent = 'Отправлено (HTTP ' + data.response_code + ')';
+            resultEl.style.display = 'block';
+
+            // Add to history
+            _cbHistory.unshift({
+                ts: Date.now() / 1000,
+                userId: userId,
+                inviteLink: inviteLink,
+                comment: comment,
+                status: 'ok',
+                code: data.response_code,
+            });
+            renderCbHistory();
+
+            // Clear form
+            document.getElementById('cb-user-id').value = '';
+            document.getElementById('cb-invite-link').value = '';
+            document.getElementById('cb-comment').value = '';
+        } else {
+            resultEl.className = 'cb-result cb-result-error';
+            resultEl.textContent = 'Ошибка: ' + (data.error || 'HTTP ' + data.response_code);
+            resultEl.style.display = 'block';
+
+            _cbHistory.unshift({
+                ts: Date.now() / 1000,
+                userId: userId,
+                inviteLink: inviteLink,
+                comment: comment,
+                status: 'error',
+                error: data.error || 'HTTP ' + data.response_code,
+            });
+            renderCbHistory();
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg> Отправить';
+        resultEl.className = 'cb-result cb-result-error';
+        resultEl.textContent = 'Ошибка: ' + e;
+        resultEl.style.display = 'block';
+    });
+}
+
+function renderCbHistory() {
+    const container = document.getElementById('cb-history');
+    if (_cbHistory.length === 0) {
+        container.innerHTML = '<div class="cb-history-empty">Пока ничего не отправлялось</div>';
+        return;
+    }
+    let html = '';
+    for (const item of _cbHistory) {
+        const ok = item.status === 'ok';
+        const icon = ok ? '&#10003;' : '&#10007;';
+        const cls = ok ? 'cb-item-ok' : 'cb-item-error';
+        const detail = ok ? 'HTTP ' + item.code : item.error;
+        html += `<div class="cb-history-item ${cls}">
+            <div class="cb-item-icon">${icon}</div>
+            <div class="cb-item-body">
+                <div class="cb-item-main">
+                    <span class="cb-item-user">ID: ${esc(item.userId)}</span>
+                    <span class="cb-item-time">${fmtTime(item.ts)}</span>
+                </div>
+                <div class="cb-item-link">${esc(item.inviteLink)}</div>
+                ${item.comment ? '<div class="cb-item-comment">' + esc(item.comment) + '</div>' : ''}
+                <div class="cb-item-status">${esc(detail)}</div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
 /* ========== LOGS ========== */
 
 function refreshLogs() {
