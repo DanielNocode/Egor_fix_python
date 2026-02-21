@@ -6,7 +6,9 @@ core/registry.py — ChatRegistry: SQLite-реестр привязки чато
   chat_assignments  — chat_id → account_name
   operations_log    — лог всех операций
   failover_log      — лог переключений аккаунтов
+  failed_requests   — неудачные запросы для повторного выполнения
 """
+import json
 import sqlite3
 import time
 import threading
@@ -67,9 +69,27 @@ class ChatRegistry:
                 reason        TEXT DEFAULT ''
             );
 
+            CREATE TABLE IF NOT EXISTS failed_requests (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              REAL NOT NULL,
+                service         TEXT NOT NULL,
+                direction       TEXT NOT NULL DEFAULT 'inbound',
+                endpoint        TEXT DEFAULT '',
+                request_payload TEXT NOT NULL DEFAULT '{}',
+                error           TEXT DEFAULT '',
+                status          TEXT DEFAULT 'pending',
+                retry_count     INTEGER DEFAULT 0,
+                last_retry_ts   REAL DEFAULT 0,
+                last_retry_error TEXT DEFAULT ''
+            );
+
             CREATE INDEX IF NOT EXISTS idx_ops_ts ON operations_log(ts);
             CREATE INDEX IF NOT EXISTS idx_ops_chat ON operations_log(chat_id);
             CREATE INDEX IF NOT EXISTS idx_fo_ts ON failover_log(ts);
+            CREATE INDEX IF NOT EXISTS idx_assign_account ON chat_assignments(account_name);
+            CREATE INDEX IF NOT EXISTS idx_ops_account ON operations_log(account_name);
+            CREATE INDEX IF NOT EXISTS idx_failed_ts ON failed_requests(ts);
+            CREATE INDEX IF NOT EXISTS idx_failed_status ON failed_requests(status);
         """)
         conn.commit()
 
@@ -86,6 +106,48 @@ class ChatRegistry:
         )
         conn.commit()
         logger.info("Assigned chat %s → account %s", chat_id, account_name)
+
+    def assign_if_not_exists(self, chat_id: str, account_name: str,
+                             title: str = "",
+                             created_at: Optional[float] = None) -> bool:
+        """Добавить чат в реестр, только если его там ещё нет.
+        Возвращает True если чат был добавлен."""
+        conn = self._get_conn()
+        existing = conn.execute(
+            "SELECT chat_id FROM chat_assignments WHERE chat_id = ?",
+            (str(chat_id),),
+        ).fetchone()
+        if existing:
+            return False
+        conn.execute(
+            """INSERT INTO chat_assignments
+               (chat_id, account_name, title, invite_link, created_at, status)
+               VALUES (?, ?, ?, '', ?, 'active')""",
+            (str(chat_id), account_name, title, created_at or time.time()),
+        )
+        conn.commit()
+        return True
+
+    def update_chat_meta(self, chat_id: str, title: str = "",
+                         created_at: Optional[float] = None):
+        """Обновить название и/или дату создания чата."""
+        conn = self._get_conn()
+        parts = []
+        params = []
+        if title:
+            parts.append("title = ?")
+            params.append(title)
+        if created_at is not None:
+            parts.append("created_at = ?")
+            params.append(created_at)
+        if not parts:
+            return
+        params.append(str(chat_id))
+        conn.execute(
+            f"UPDATE chat_assignments SET {', '.join(parts)} WHERE chat_id = ?",
+            params,
+        )
+        conn.commit()
 
     def get_account(self, chat_id: str) -> Optional[str]:
         conn = self._get_conn()
@@ -143,6 +205,29 @@ class ChatRegistry:
         ).fetchall()
         return {row["account_name"]: row["cnt"] for row in rows}
 
+    def get_chat_titles(self, chat_ids: Optional[list] = None) -> Dict[str, str]:
+        """Маппинг chat_id → title из chat_assignments.
+        Если chat_ids указаны — только для них (эффективнее при большом кол-ве чатов)."""
+        conn = self._get_conn()
+        if chat_ids:
+            # SQLite ограничение: max 999 переменных в IN, разбиваем на чанки
+            result = {}
+            for i in range(0, len(chat_ids), 500):
+                chunk = chat_ids[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT chat_id, title FROM chat_assignments "
+                    f"WHERE title != '' AND chat_id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    result[row["chat_id"]] = row["title"]
+            return result
+        rows = conn.execute(
+            "SELECT chat_id, title FROM chat_assignments WHERE title != ''"
+        ).fetchall()
+        return {row["chat_id"]: row["title"] for row in rows}
+
     # === Operations Log =======================================================
 
     def log_operation(self, account_name: str, chat_id: str,
@@ -160,6 +245,14 @@ class ChatRegistry:
         rows = conn.execute(
             "SELECT * FROM operations_log ORDER BY ts DESC LIMIT ?",
             (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_operations_by_chat(self, chat_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM operations_log WHERE chat_id = ? ORDER BY ts DESC LIMIT ?",
+            (str(chat_id), limit),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -187,6 +280,16 @@ class ChatRegistry:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_last_active_times(self) -> Dict[str, float]:
+        """Последняя успешная операция для каждого аккаунта (из operations_log)."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT account_name, MAX(ts) as last_ts "
+            "FROM operations_log WHERE status = 'ok' "
+            "GROUP BY account_name"
+        ).fetchall()
+        return {row["account_name"]: row["last_ts"] for row in rows}
+
     # === Stats ================================================================
 
     def get_stats(self) -> Dict[str, Any]:
@@ -210,6 +313,68 @@ class ChatRegistry:
             "total_failovers": failovers,
         }
 
+    # === Failed Requests =====================================================
+
+    def save_failed_request(self, service: str, endpoint: str,
+                            request_payload: dict, error: str,
+                            direction: str = "inbound"):
+        conn = self._get_conn()
+        conn.execute(
+            """INSERT INTO failed_requests
+               (ts, service, direction, endpoint, request_payload, error, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
+            (time.time(), service, direction, endpoint,
+             json.dumps(request_payload, ensure_ascii=False), error),
+        )
+        conn.commit()
+
+    def get_failed_requests(self, limit: int = 200) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM failed_requests ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_failed_request_by_id(self, req_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM failed_requests WHERE id = ?", (req_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_failed_request(self, req_id: int, status: str,
+                              last_retry_error: str = ""):
+        conn = self._get_conn()
+        conn.execute(
+            """UPDATE failed_requests
+               SET status = ?, retry_count = retry_count + 1,
+                   last_retry_ts = ?, last_retry_error = ?
+               WHERE id = ?""",
+            (status, time.time(), last_retry_error, req_id),
+        )
+        conn.commit()
+
+    def update_failed_request_payload(self, req_id: int, new_payload: str):
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE failed_requests SET request_payload = ? WHERE id = ?",
+            (new_payload, req_id),
+        )
+        conn.commit()
+
+    def delete_failed_request(self, req_id: int):
+        conn = self._get_conn()
+        conn.execute("DELETE FROM failed_requests WHERE id = ?", (req_id,))
+        conn.commit()
+
+    def get_failed_requests_count(self) -> int:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT COUNT(*) as c FROM failed_requests WHERE status = 'pending'"
+        ).fetchone()
+        return row["c"]
+
     # === Cleanup ==============================================================
 
     def cleanup_old_logs(self, days: int = 30):
@@ -217,4 +382,8 @@ class ChatRegistry:
         conn = self._get_conn()
         conn.execute("DELETE FROM operations_log WHERE ts < ?", (cutoff,))
         conn.execute("DELETE FROM failover_log WHERE ts < ?", (cutoff,))
+        conn.execute(
+            "DELETE FROM failed_requests WHERE status != 'pending' AND ts < ?",
+            (cutoff,),
+        )
         conn.commit()

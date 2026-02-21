@@ -30,6 +30,7 @@ from telethon.utils import get_peer_id
 from core.bridge import TelethonBridge
 from core.router import AccountRouter
 from core.retry import run_with_retry
+from core import bot_fallback
 
 logger = logging.getLogger("svc.send_text")
 
@@ -46,6 +47,44 @@ def init(router: AccountRouter, loop: asyncio.AbstractEventLoop):
 
 def _run(coro, timeout=120):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout=timeout)
+
+
+def _save_failed(data: dict, error: str):
+    try:
+        _router.registry.save_failed_request(
+            service="send_text", endpoint="/send_text",
+            request_payload=data, error=error,
+        )
+    except Exception:
+        pass
+
+
+def _try_bot_fallback(chat_ref, text: str, parse_mode: str,
+                      disable_preview: bool, reply_to: Optional[int],
+                      tag_text: str = "") -> Optional[Dict[str, Any]]:
+    """Попытка отправить через Bot API (@alex_rumhelp_bot) как последний фоллбэк."""
+    if not bot_fallback.is_configured():
+        return None
+    try:
+        msg_text = tag_text if tag_text else (text or "")
+        msg = bot_fallback.send_text(
+            chat_id=chat_ref,
+            text=msg_text,
+            parse_mode=parse_mode or "HTML",
+            disable_web_page_preview=disable_preview,
+            reply_to_message_id=reply_to,
+        )
+        logger.info("Bot fallback succeeded for chat %s", chat_ref)
+        return {
+            "status": "ok",
+            "chat_id": str(chat_ref),
+            "message_id": msg.get("message_id"),
+            "chat_type": "group",
+            "fallback": "bot_api",
+        }
+    except Exception as bot_err:
+        logger.error("Bot fallback also failed for chat %s: %s", chat_ref, bot_err)
+        return None
 
 
 # === Helpers ==================================================================
@@ -241,6 +280,13 @@ def send_text():
     try:
         bridge = _router.pick_for_chat(chat_ref, service="send_text")
     except RuntimeError as e:
+        # Все аккаунты недоступны — пробуем Bot API
+        bot_result = _try_bot_fallback(
+            chat_ref, text, parse_mode, disable_preview,
+            int(reply_to) if reply_to is not None else None,
+        )
+        if bot_result:
+            return jsonify(bot_result)
         return jsonify({"error": str(e)}), 503
 
     try:
@@ -262,9 +308,9 @@ def send_text():
 
     except tl_errors.FloodWaitError as e:
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
-        # Failover
-        fallback = _router.pool.get_next_healthy("send_text", exclude_key=bridge.name)
-        if fallback:
+        # Failover — пробуем все оставшиеся аккаунты
+        fallbacks = _router.pool.get_all_healthy_except("send_text", exclude_key=bridge.name)
+        for fallback in fallbacks:
             try:
                 result = _run(
                     run_with_retry(
@@ -282,13 +328,56 @@ def send_text():
                 _router.handle_success(fallback, str(chat_ref), "send_text")
                 return jsonify(result)
             except Exception:
-                pass
+                continue
+        # Последний шанс — Bot API fallback
+        bot_result = _try_bot_fallback(chat_ref, text, parse_mode, disable_preview, reply_to)
+        if bot_result:
+            return jsonify(bot_result)
+        _save_failed(data, f"FloodWait {e.seconds}s (all accounts)")
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
+
+    except ValueError as e:
+        # Entity resolution failed — пробуем все оставшиеся аккаунты
+        if "Cannot resolve" in str(e):
+            logger.warning("send_text: entity %s not found on %s, trying failover", chat_ref, bridge.name)
+            fallbacks = _router.pool.get_all_healthy_except("send_text", exclude_key=bridge.name)
+            for fallback in fallbacks:
+                try:
+                    result = _run(
+                        run_with_retry(
+                            _send_text_impl, fallback.client,
+                            fallback, chat_ref, text, tag_client,
+                            int(client_id) if client_id is not None else None,
+                            client_username if isinstance(client_username, str) else None,
+                            exclude_usernames if isinstance(exclude_usernames, list) else [],
+                            disable_preview,
+                            int(reply_to) if reply_to is not None else None,
+                            parse_mode,
+                        ),
+                        timeout=120,
+                    )
+                    _router.handle_success(fallback, str(chat_ref), "send_text")
+                    return jsonify(result)
+                except Exception:
+                    continue
+        _router.handle_error(bridge, e, str(chat_ref), "send_text")
+        logger.error("send_text failed: %s: %s", type(e).__name__, e)
+        # Bot API fallback
+        bot_result = _try_bot_fallback(chat_ref, text, parse_mode, disable_preview, reply_to)
+        if bot_result:
+            return jsonify(bot_result)
+        _save_failed(data, str(e))
+        return jsonify({"status": "error", "error": str(e)}), 500
 
     except Exception as e:
         import traceback
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
         logger.error("send_text failed: %s: %s", type(e).__name__, e)
+        # Bot API fallback
+        bot_result = _try_bot_fallback(chat_ref, text, parse_mode, disable_preview, reply_to)
+        if bot_result:
+            return jsonify(bot_result)
+        _save_failed(data, str(e))
         return jsonify({
             "status": "error",
             "error": str(e),

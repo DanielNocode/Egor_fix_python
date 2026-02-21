@@ -33,7 +33,7 @@ def init(router: AccountRouter, loop: asyncio.AbstractEventLoop):
     _loop = loop
 
 
-def _run(coro, timeout=60):
+def _run(coro, timeout=180):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout=timeout)
 
 
@@ -82,6 +82,7 @@ async def _kick_all_members(bridge: TelethonBridge, channel_peer: Any) -> list:
                 ))
                 kicked.append(user.id)
                 logger.info("Kicked user %s (%s) from chat", user.id, user.username or "no_username")
+                await asyncio.sleep(0.5)  # пауза между кикам чтобы не словить FloodWait
             except Exception as e:
                 logger.warning("Failed to kick user %s: %s", user.id, e)
     except Exception as e:
@@ -139,7 +140,23 @@ def leave_chat():
         return jsonify(result), code
 
     except Exception as e:
+        # Если чат не найден — фактически мы уже вышли, помечаем как left
+        if isinstance(e, ValueError) and "Cannot resolve" in str(e):
+            _router.registry.mark_left(str(chat_ref))
+            logger.info("leave_chat: chat %s not found, marking as left", chat_ref)
+            return jsonify({
+                "status": "ok",
+                "left_type": "unresolvable",
+                "note": "Chat not found, marked as left",
+            })
         _router.handle_error(bridge, e, str(chat_ref), "leave_chat")
+        try:
+            _router.registry.save_failed_request(
+                service="leave_chat", endpoint="/leave_chat",
+                request_payload=data, error=str(e),
+            )
+        except Exception:
+            pass
         return jsonify({"status": "error", "error": str(e)}), 500
 
 

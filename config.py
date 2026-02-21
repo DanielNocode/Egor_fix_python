@@ -109,5 +109,10 @@ SALEBOT_CALLBACK_URL = os.environ.get(
 )
 SALEBOT_GROUP_ID = os.environ.get("SALEBOT_GROUP_ID", "alex_rumhelp_bot")
 
+# === Bot API Fallback ========================================================
+# Токен бота @alex_rumhelp_bot — используется как fallback для отправки
+# сообщений, когда все Telethon-аккаунты недоступны (бан, FloodWait и т.д.)
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8509333133:AAGYhLFHc1YYl5uyLB1gui5rDHzkYOE0nS4")
+
 # === Logging =================================================================
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")

@@ -114,6 +114,14 @@ class AccountPool:
                 return bridge
         return None
 
+    def get_all_healthy_except(self, service: str, exclude_key: str) -> List[TelethonBridge]:
+        """Все здоровые bridge'и для сервиса, кроме указанного (по приоритету)."""
+        return [
+            self.bridges[k]
+            for k in self._sorted_by_service.get(service, [])
+            if k != exclude_key and self.bridges[k].is_healthy
+        ]
+
     def get_by_account(self, account_name: str, service: str) -> Optional[TelethonBridge]:
         """Получить bridge конкретного аккаунта для конкретного сервиса."""
         key = f"{account_name}:{service}"

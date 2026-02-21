@@ -28,6 +28,7 @@ from telethon.tl.types import PeerChannel, PeerChat, PeerUser
 from core.bridge import TelethonBridge
 from core.router import AccountRouter
 from core.retry import run_with_retry
+from core import bot_fallback
 
 logger = logging.getLogger("svc.send_media")
 
@@ -44,6 +45,64 @@ def init(router: AccountRouter, loop: asyncio.AbstractEventLoop):
 
 def _run(coro, timeout=180):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout=timeout)
+
+
+def _save_failed(data: dict, error: str):
+    try:
+        _router.registry.save_failed_request(
+            service="send_media", endpoint="/send_media",
+            request_payload=data, error=error,
+        )
+    except Exception:
+        pass
+
+
+def _try_bot_fallback(chat_id, files: list, caption: str,
+                      parse_mode: str, force_document: bool = False) -> Optional[dict]:
+    """Попытка отправить через Bot API (@alex_rumhelp_bot) как последний фоллбэк."""
+    if not bot_fallback.is_configured():
+        return None
+    if chat_id is None:
+        return None
+    try:
+        sent_ids = []
+        for i, f in enumerate(files):
+            file_url = None
+            fd = False
+            if isinstance(f, str):
+                file_url = f if _is_url(f) else None
+            elif isinstance(f, dict):
+                file_url = f.get("url") or f.get("file") or f.get("path")
+                fd = bool(f.get("force_document", force_document))
+                if file_url and not _is_url(file_url):
+                    file_url = None
+
+            if not file_url:
+                continue
+
+            cap = caption if i == 0 else ""
+            msg = bot_fallback.send_media_by_url(
+                chat_id=chat_id,
+                file_url=file_url,
+                caption=cap,
+                parse_mode=parse_mode or "HTML",
+                force_document=fd,
+            )
+            sent_ids.append(msg.get("message_id"))
+
+        if sent_ids:
+            logger.info("Bot fallback send_media succeeded for %s: %s", chat_id, sent_ids)
+            return {
+                "status": "ok",
+                "recipient": chat_id,
+                "message_ids": sent_ids,
+                "count": len(sent_ids),
+                "fallback": "bot_api",
+            }
+        return None
+    except Exception as bot_err:
+        logger.error("Bot fallback send_media also failed for %s: %s", chat_id, bot_err)
+        return None
 
 
 # === Helpers (из оригинального send_media) ====================================
@@ -234,6 +293,10 @@ def send_media():
     try:
         bridge = _router.pick_for_recipient(service="send_media", user_id=user_id, username=username)
     except RuntimeError as e:
+        # Все аккаунты недоступны — пробуем Bot API
+        bot_result = _try_bot_fallback(user_id, files, caption, parse_mode)
+        if bot_result:
+            return jsonify(bot_result)
         return jsonify({"status": "error", "error": str(e)}), 503
 
     try:
@@ -257,9 +320,9 @@ def send_media():
     except tl_errors.FloodWaitError as e:
         chat_str = str(user_id) if user_id else (username or "")
         _router.handle_error(bridge, e, chat_str, "send_media")
-        # Failover
-        fallback = _router.pool.get_next_healthy("send_media", exclude_key=bridge.name)
-        if fallback:
+        # Failover — пробуем все оставшиеся аккаунты
+        fallbacks = _router.pool.get_all_healthy_except("send_media", exclude_key=bridge.name)
+        for fallback in fallbacks:
             try:
                 entity, msgs = _run(
                     run_with_retry(
@@ -277,23 +340,70 @@ def send_media():
                     "count": len(msgs),
                 })
             except Exception:
-                pass
+                continue
+        # Bot API fallback
+        bot_result = _try_bot_fallback(user_id, files, caption, parse_mode)
+        if bot_result:
+            return jsonify(bot_result)
+        _save_failed(data, f"FloodWait {e.seconds}s (all accounts)")
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
 
     except tl_errors.FileReferenceExpiredError:
+        _save_failed(data, "File reference expired")
         return jsonify({"status": "error", "error": "File reference expired. Re-fetch the post or use a fresh link."}), 410
 
     except tl_errors.UsernameNotOccupiedError:
+        _save_failed(data, "Channel/username not found")
         return jsonify({"status": "error", "error": "Channel/username not found"}), 404
 
     except tl_errors.PeerIdInvalidError:
+        _save_failed(data, "Invalid peer")
         return jsonify({"status": "error", "error": "Invalid peer (user_id/username)"}), 400
+
+    except ValueError as e:
+        # Entity resolution failed — пробуем все оставшиеся аккаунты
+        chat_str = str(user_id) if user_id else (username or "")
+        if "Cannot resolve" in str(e):
+            logger.warning("send_media: entity %s not found on %s, trying failover", chat_str, bridge.name)
+            fallbacks = _router.pool.get_all_healthy_except("send_media", exclude_key=bridge.name)
+            for fallback in fallbacks:
+                try:
+                    entity, msgs = _run(
+                        run_with_retry(
+                            _send_media_impl, fallback.client,
+                            fallback, user_id, username,
+                            files, caption, parse_mode, disable_web_page_preview,
+                        ),
+                        timeout=180,
+                    )
+                    _router.handle_success(fallback, chat_str, "send_media")
+                    return jsonify({
+                        "status": "ok",
+                        "recipient": username if username else user_id,
+                        "message_ids": [m.id for m in msgs],
+                        "count": len(msgs),
+                    })
+                except Exception:
+                    continue
+        _router.handle_error(bridge, e, chat_str, "send_media")
+        logger.error("send_media failed: %s: %s", type(e).__name__, e)
+        # Bot API fallback
+        bot_result = _try_bot_fallback(user_id, files, caption, parse_mode)
+        if bot_result:
+            return jsonify(bot_result)
+        _save_failed(data, str(e))
+        return jsonify({"status": "error", "error": str(e)}), 500
 
     except Exception as e:
         import traceback
         chat_str = str(user_id) if user_id else (username or "")
         _router.handle_error(bridge, e, chat_str, "send_media")
         logger.error("send_media failed: %s: %s", type(e).__name__, e)
+        # Bot API fallback
+        bot_result = _try_bot_fallback(user_id, files, caption, parse_mode)
+        if bot_result:
+            return jsonify(bot_result)
+        _save_failed(data, str(e))
         return jsonify({
             "status": "error",
             "error": str(e),

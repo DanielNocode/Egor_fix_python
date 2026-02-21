@@ -3,6 +3,15 @@
 let _autoTimer = null;
 let _allLogs = [];
 
+const PAGE_SIZE = 20;
+let _allChats = [];
+let _allFos = [];
+let _allFailed = [];
+let _shownChats = PAGE_SIZE;
+let _shownFos = PAGE_SIZE;
+let _shownLogs = PAGE_SIZE;
+let _shownFailed = PAGE_SIZE;
+
 /* ========== ПЕРЕВОД ОШИБОК ========== */
 
 const ERROR_TRANSLATIONS = [
@@ -226,6 +235,10 @@ function refreshSummary() {
             document.getElementById('s-errors').textContent = data.total_errors;
             document.getElementById('s-failovers').textContent = data.total_failovers;
 
+            const retriesEl = document.getElementById('s-retries');
+            retriesEl.textContent = data.pending_retries || 0;
+            retriesEl.className = 'summary-value' + ((data.pending_retries || 0) > 0 ? ' val-red' : '');
+
             const errEl = document.getElementById('s-errors');
             errEl.className = 'summary-value' + (data.total_errors > 0 ? ' val-red' : '');
         })
@@ -361,39 +374,125 @@ function restartPlatform() {
     .catch(e => alert('Ошибка перезапуска: ' + e));
 }
 
+/* ========== SHOW MORE HELPERS ========== */
+
+function showMoreBar(total, shown, showMoreFn, collapseFn) {
+    if (total === 0) return '';
+    if (total <= PAGE_SIZE) return '';
+    if (shown < total) {
+        const remaining = total - shown;
+        const next = Math.min(PAGE_SIZE, remaining);
+        return `<div class="show-more-bar">
+            <span class="muted">Показано ${shown} из ${total}</span>
+            <button class="btn btn-sm btn-show-more" onclick="${showMoreFn}()">Показать ещё ${next}</button>
+            <button class="btn btn-sm" onclick="${showMoreFn}(true)">Показать все</button>
+        </div>`;
+    }
+    return `<div class="show-more-bar">
+        <span class="muted">Показаны все ${total}</span>
+        <button class="btn btn-sm" onclick="${collapseFn}()">Свернуть</button>
+    </div>`;
+}
+
 /* ========== CHATS ========== */
 
 function refreshChats() {
-    fetch('/api/chats?limit=200')
+    fetch('/api/chats?limit=2000')
         .then(r => r.json())
         .then(data => {
-            const tbody = document.getElementById('chats-tbody');
-            let html = '';
-            for (const c of data.chats) {
-                const statusText = c.status === 'active' ? 'Активен' : 'Покинут';
-                const cls = c.status === 'active' ? 'status-active' : 'status-left';
-                html += `<tr>
-                    <td>${esc(c.chat_id)}</td>
-                    <td>${esc(c.title)}</td>
-                    <td>${esc(c.account_name)}</td>
-                    <td>${fmtTime(c.created_at)}</td>
-                    <td class="${cls}">${statusText}</td>
-                </tr>`;
-            }
-            tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Чатов пока нет</td></tr>';
+            _allChats = data.chats || [];
+            _shownChats = PAGE_SIZE;
+            renderChats();
         })
         .catch(() => {});
 }
 
-/* ========== OPERATIONS ========== */
+function renderChats() {
+    const tbody = document.getElementById('chats-tbody');
+    const showing = _allChats.slice(0, _shownChats);
+    let html = '';
+    for (const c of showing) {
+        const statusText = c.status === 'active' ? 'Активен' : 'Покинут';
+        const cls = c.status === 'active' ? 'status-active' : 'status-left';
+        html += `<tr class="clickable-row" onclick="openChatOps('${esc(c.chat_id)}', '${esc(c.title || c.chat_id)}')">
+            <td>${esc(c.chat_id)}</td>
+            <td>${esc(c.title)}</td>
+            <td>${esc(c.account_name)}</td>
+            <td>${fmtTime(c.created_at)}</td>
+            <td class="${cls}">${statusText}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Чатов пока нет</td></tr>';
+    document.getElementById('chats-more').innerHTML =
+        showMoreBar(_allChats.length, _shownChats, 'showMoreChats', 'collapseChats');
+}
 
-function refreshOperations() {
-    fetch('/api/operations?limit=100')
+function showMoreChats(all) {
+    _shownChats = all ? _allChats.length : _shownChats + PAGE_SIZE;
+    renderChats();
+}
+function collapseChats() { _shownChats = PAGE_SIZE; renderChats(); }
+
+/* ========== SYNC DIALOGS ========== */
+
+function syncDialogs() {
+    const btn = document.getElementById('sync-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Синхронизация...';
+
+    fetch('/api/sync_dialogs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Синхронизировать';
+
+        if (data.status === 'ok') {
+            const msg = `Синхронизация завершена: добавлено ${data.added}, уже было ${data.skipped}, всего найдено ${data.total_seen} групп`;
+            alert(msg);
+            refreshChats();
+            refreshLoad();
+            refreshSummary();
+        } else {
+            alert('Ошибка синхронизации: ' + (data.error || 'unknown'));
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Синхронизировать';
+        alert('Ошибка: ' + e);
+    });
+}
+
+/* ========== CHAT OPERATIONS MODAL ========== */
+
+let _chatOpsOpen = false;
+
+function openChatOps(chatId, chatTitle) {
+    _chatOpsOpen = true;
+    document.getElementById('chat-ops-title').textContent =
+        'Операции: ' + (chatTitle || chatId);
+    document.getElementById('chat-ops-loading').style.display = 'block';
+    document.getElementById('chat-ops-table-wrap').style.display = 'none';
+    document.getElementById('chat-ops-empty').style.display = 'none';
+    document.getElementById('chat-ops-modal').style.display = 'flex';
+
+    fetch('/api/operations_by_chat?chat_id=' + encodeURIComponent(chatId) + '&limit=200')
         .then(r => r.json())
         .then(data => {
-            const tbody = document.getElementById('ops-tbody');
+            const ops = data.operations || [];
+            document.getElementById('chat-ops-loading').style.display = 'none';
+
+            if (ops.length === 0) {
+                document.getElementById('chat-ops-empty').style.display = 'block';
+                return;
+            }
+
+            const tbody = document.getElementById('chat-ops-tbody');
             let html = '';
-            for (const op of data.operations) {
+            for (const op of ops) {
                 let cls = '';
                 if (op.status === 'ok') cls = 'status-ok';
                 else if (op.status === 'error' || op.status === 'banned') cls = 'status-error';
@@ -405,61 +504,399 @@ function refreshOperations() {
                 html += `<tr>
                     <td>${fmtTime(op.ts)}</td>
                     <td>${esc(op.account_name)}</td>
-                    <td>${esc(op.chat_id)}</td>
                     <td>${esc(SERVICE_NAMES[op.operation] || op.operation)}</td>
                     <td class="${cls}">${opStatusRu(op.status)}</td>
-                    <td class="detail" title="${esc(op.detail || '')}">${esc(detailText.substring(0, 60))}</td>
+                    <td class="detail" title="${esc(op.detail || '')}">${esc(detailText.substring(0, 80))}</td>
                 </tr>`;
             }
-            tbody.innerHTML = html || '<tr><td colspan="6" class="empty-row">Операций пока нет</td></tr>';
+            tbody.innerHTML = html;
+            document.getElementById('chat-ops-table-wrap').style.display = 'block';
         })
-        .catch(() => {});
+        .catch(() => {
+            document.getElementById('chat-ops-loading').textContent = 'Ошибка загрузки';
+        });
+}
+
+function closeChatOpsModal() {
+    document.getElementById('chat-ops-modal').style.display = 'none';
+    _chatOpsOpen = false;
 }
 
 /* ========== FAILOVERS ========== */
 
 function refreshFailovers() {
-    fetch('/api/failovers?limit=50')
+    fetch('/api/failovers?limit=500')
         .then(r => r.json())
         .then(data => {
-            const tbody = document.getElementById('fo-tbody');
-            let html = '';
-            for (const fo of data.failovers) {
-                const reason = fo.reason ? translateError(fo.reason) : null;
-                const reasonText = reason ? reason.text : (fo.reason || '');
-                html += `<tr>
-                    <td>${fmtTime(fo.ts)}</td>
-                    <td>${esc(fo.chat_id)}</td>
-                    <td>${esc(fo.from_account)}</td>
-                    <td>${esc(fo.to_account)}</td>
-                    <td class="detail" title="${esc(fo.reason || '')}">${esc(reasonText.substring(0, 60))}</td>
-                </tr>`;
-            }
-            tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Переключений пока не было</td></tr>';
+            _allFos = data.failovers || [];
+            _shownFos = PAGE_SIZE;
+            renderFos();
         })
         .catch(() => {});
+}
+
+function renderFos() {
+    const tbody = document.getElementById('fo-tbody');
+    const showing = _allFos.slice(0, _shownFos);
+    let html = '';
+    for (const fo of showing) {
+        const reason = fo.reason ? translateError(fo.reason) : null;
+        const reasonText = reason ? reason.text : (fo.reason || '');
+        html += `<tr>
+            <td>${fmtTime(fo.ts)}</td>
+            <td>${esc(fo.chat_id)}</td>
+            <td>${esc(fo.from_account)}</td>
+            <td>${esc(fo.to_account)}</td>
+            <td class="detail" title="${esc(fo.reason || '')}">${esc(reasonText.substring(0, 60))}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Переключений пока не было</td></tr>';
+    document.getElementById('fo-more').innerHTML =
+        showMoreBar(_allFos.length, _shownFos, 'showMoreFos', 'collapseFos');
+}
+
+function showMoreFos(all) {
+    _shownFos = all ? _allFos.length : _shownFos + PAGE_SIZE;
+    renderFos();
+}
+function collapseFos() { _shownFos = PAGE_SIZE; renderFos(); }
+
+/* ========== FAILED REQUESTS ========== */
+
+const DIRECTION_NAMES = {
+    inbound: 'Входящий',
+    outbound: 'Исходящий',
+};
+
+const FAILED_STATUS_NAMES = {
+    pending: 'Ожидает',
+    retried: 'Повторён',
+    resolved: 'Решён',
+};
+
+function refreshFailed() {
+    fetch('/api/failed_requests?limit=500')
+        .then(r => r.json())
+        .then(data => {
+            _allFailed = data.failed_requests || [];
+            _shownFailed = PAGE_SIZE;
+            renderFailed();
+        })
+        .catch(() => {});
+}
+
+function renderFailed() {
+    const tbody = document.getElementById('failed-tbody');
+    const showing = _allFailed.slice(0, _shownFailed);
+    let html = '';
+    for (const item of showing) {
+        const err = translateError(item.error);
+        const errText = err ? err.text : (item.error || '');
+        const statusCls = item.status === 'pending' ? 'status-error'
+            : item.status === 'retried' ? 'status-ok' : '';
+        const retryInfo = item.retry_count > 0
+            ? ` (${item.retry_count}x, ${item.last_retry_error ? item.last_retry_error.substring(0, 40) : ''})`
+            : '';
+
+        let actions = `<button onclick="openEditModal(${item.id})" class="btn btn-sm">Редактировать</button> `;
+        if (item.status === 'pending') {
+            actions += `<button onclick="retryRequest(${item.id})" class="btn btn-sm btn-blue">Повторить</button> `;
+        }
+        actions += `<button onclick="deleteRequest(${item.id})" class="btn btn-sm btn-red">Удалить</button>`;
+
+        html += `<tr>
+            <td>${fmtTime(item.ts)}</td>
+            <td>${esc(SERVICE_NAMES[item.service] || item.service)}</td>
+            <td>${esc(DIRECTION_NAMES[item.direction] || item.direction)}</td>
+            <td class="detail" title="${esc(item.error || '')}">${esc(errText.substring(0, 50))}</td>
+            <td>${item.retry_count}${esc(retryInfo)}</td>
+            <td class="${statusCls}">${esc(FAILED_STATUS_NAMES[item.status] || item.status)}</td>
+            <td class="actions-cell">${actions}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html || '<tr><td colspan="7" class="empty-row">Неудачных запросов нет</td></tr>';
+    document.getElementById('failed-more').innerHTML =
+        showMoreBar(_allFailed.length, _shownFailed, 'showMoreFailed', 'collapseFailed');
+}
+
+function showMoreFailed(all) {
+    _shownFailed = all ? _allFailed.length : _shownFailed + PAGE_SIZE;
+    renderFailed();
+}
+function collapseFailed() { _shownFailed = PAGE_SIZE; renderFailed(); }
+
+function retryRequest(id) {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Повтор...';
+    fetch('/api/retry_request', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: id}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            btn.textContent = 'Готово';
+            btn.className = 'btn btn-sm btn-green';
+            setTimeout(refreshFailed, 1000);
+        } else {
+            alert('Ошибка повтора: ' + (data.error || 'unknown'));
+            btn.disabled = false;
+            btn.textContent = 'Повторить';
+        }
+    })
+    .catch(e => {
+        alert('Ошибка: ' + e);
+        btn.disabled = false;
+        btn.textContent = 'Повторить';
+    });
+}
+
+function deleteRequest(id) {
+    if (!confirm('Удалить этот запрос?')) return;
+    fetch('/api/delete_failed', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: id}),
+    })
+    .then(() => refreshFailed())
+    .catch(e => alert('Ошибка: ' + e));
+}
+
+let _editingRequestId = null;
+
+function openEditModal(id) {
+    const item = _allFailed.find(f => f.id === id);
+    if (!item) return;
+    _editingRequestId = id;
+
+    document.getElementById('modal-service').textContent =
+        SERVICE_NAMES[item.service] || item.service;
+    document.getElementById('modal-direction').textContent =
+        DIRECTION_NAMES[item.direction] || item.direction;
+    document.getElementById('modal-endpoint').textContent =
+        item.endpoint || '';
+    document.getElementById('modal-title').textContent =
+        'Редактирование запроса #' + id;
+
+    const textarea = document.getElementById('modal-payload');
+    try {
+        const parsed = JSON.parse(item.request_payload);
+        textarea.value = JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        textarea.value = item.request_payload;
+    }
+
+    document.getElementById('modal-error').style.display = 'none';
+    document.getElementById('edit-modal').style.display = 'flex';
+    textarea.focus();
+}
+
+function closeEditModal() {
+    document.getElementById('edit-modal').style.display = 'none';
+    _editingRequestId = null;
+}
+
+function _getEditedPayload() {
+    const raw = document.getElementById('modal-payload').value.trim();
+    const errEl = document.getElementById('modal-error');
+    try {
+        JSON.parse(raw);
+        errEl.style.display = 'none';
+        return raw;
+    } catch (e) {
+        errEl.textContent = 'Невалидный JSON: ' + e.message;
+        errEl.style.display = 'block';
+        return null;
+    }
+}
+
+function savePayload() {
+    const payload = _getEditedPayload();
+    if (payload === null) return;
+
+    fetch('/api/update_failed_payload', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: _editingRequestId, payload: payload}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            closeEditModal();
+            refreshFailed();
+        } else {
+            const errEl = document.getElementById('modal-error');
+            errEl.textContent = 'Ошибка сохранения: ' + (data.error || 'unknown');
+            errEl.style.display = 'block';
+        }
+    })
+    .catch(e => {
+        const errEl = document.getElementById('modal-error');
+        errEl.textContent = 'Ошибка: ' + e;
+        errEl.style.display = 'block';
+    });
+}
+
+function saveAndRetry() {
+    const payload = _getEditedPayload();
+    if (payload === null) return;
+
+    const errEl = document.getElementById('modal-error');
+    errEl.style.display = 'none';
+
+    fetch('/api/retry_request', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: _editingRequestId, payload: payload}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            closeEditModal();
+            refreshFailed();
+            refreshSummary();
+        } else {
+            errEl.textContent = 'Ошибка повтора: ' + (data.error || 'unknown');
+            errEl.style.display = 'block';
+        }
+    })
+    .catch(e => {
+        errEl.textContent = 'Ошибка: ' + e;
+        errEl.style.display = 'block';
+    });
+}
+
+/* ========== SALEBOT CALLBACKS ========== */
+
+let _cbHistory = [];
+
+function sendCallback() {
+    const userId = document.getElementById('cb-user-id').value.trim();
+    const inviteLink = document.getElementById('cb-invite-link').value.trim();
+    const comment = document.getElementById('cb-comment').value.trim();
+    const resultEl = document.getElementById('cb-result');
+    const btn = document.getElementById('cb-send-btn');
+
+    if (!userId || !inviteLink) {
+        resultEl.className = 'cb-result cb-result-error';
+        resultEl.textContent = 'Заполните ID пользователя и инвайт-ссылку';
+        resultEl.style.display = 'block';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Отправка...';
+    resultEl.style.display = 'none';
+
+    fetch('/api/send_salebot_callback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, invite_link: inviteLink}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg> Отправить';
+
+        if (data.status === 'ok') {
+            resultEl.className = 'cb-result cb-result-ok';
+            resultEl.textContent = 'Отправлено (HTTP ' + data.response_code + ')';
+            resultEl.style.display = 'block';
+
+            // Add to history
+            _cbHistory.unshift({
+                ts: Date.now() / 1000,
+                userId: userId,
+                inviteLink: inviteLink,
+                comment: comment,
+                status: 'ok',
+                code: data.response_code,
+            });
+            renderCbHistory();
+
+            // Clear form
+            document.getElementById('cb-user-id').value = '';
+            document.getElementById('cb-invite-link').value = '';
+            document.getElementById('cb-comment').value = '';
+        } else {
+            resultEl.className = 'cb-result cb-result-error';
+            resultEl.textContent = 'Ошибка: ' + (data.error || 'HTTP ' + data.response_code);
+            resultEl.style.display = 'block';
+
+            _cbHistory.unshift({
+                ts: Date.now() / 1000,
+                userId: userId,
+                inviteLink: inviteLink,
+                comment: comment,
+                status: 'error',
+                error: data.error || 'HTTP ' + data.response_code,
+            });
+            renderCbHistory();
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg> Отправить';
+        resultEl.className = 'cb-result cb-result-error';
+        resultEl.textContent = 'Ошибка: ' + e;
+        resultEl.style.display = 'block';
+    });
+}
+
+function renderCbHistory() {
+    const container = document.getElementById('cb-history');
+    if (_cbHistory.length === 0) {
+        container.innerHTML = '<div class="cb-history-empty">Пока ничего не отправлялось</div>';
+        return;
+    }
+    let html = '';
+    for (const item of _cbHistory) {
+        const ok = item.status === 'ok';
+        const icon = ok ? '&#10003;' : '&#10007;';
+        const cls = ok ? 'cb-item-ok' : 'cb-item-error';
+        const detail = ok ? 'HTTP ' + item.code : item.error;
+        html += `<div class="cb-history-item ${cls}">
+            <div class="cb-item-icon">${icon}</div>
+            <div class="cb-item-body">
+                <div class="cb-item-main">
+                    <span class="cb-item-user">ID: ${esc(item.userId)}</span>
+                    <span class="cb-item-time">${fmtTime(item.ts)}</span>
+                </div>
+                <div class="cb-item-link">${esc(item.inviteLink)}</div>
+                ${item.comment ? '<div class="cb-item-comment">' + esc(item.comment) + '</div>' : ''}
+                <div class="cb-item-status">${esc(detail)}</div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
 }
 
 /* ========== LOGS ========== */
 
 function refreshLogs() {
-    fetch('/api/logs?n=80')
+    fetch('/api/logs?n=200')
         .then(r => r.json())
         .then(data => {
             _allLogs = data.logs || [];
-            renderLogs(_allLogs);
+            _shownLogs = PAGE_SIZE;
+            renderLogs();
         })
         .catch(() => {});
 }
 
-function renderLogs(lines) {
+function renderLogs(filteredLines) {
+    const lines = filteredLines || _allLogs;
     const wrap = document.getElementById('logs-wrap');
     if (lines.length === 0) {
         wrap.innerHTML = '<div class="empty-row">Логов пока нет</div>';
+        document.getElementById('logs-more').innerHTML = '';
         return;
     }
+    const showing = lines.slice(0, filteredLines ? lines.length : _shownLogs);
     let html = '';
-    for (const line of lines) {
+    for (const line of showing) {
         let cls = '';
         if (/ERROR/i.test(line)) cls = 'log-error';
         else if (/WARNING/i.test(line)) cls = 'log-warn';
@@ -467,12 +904,23 @@ function renderLogs(lines) {
         html += `<div class="log-line ${cls}">${esc(line)}</div>`;
     }
     wrap.innerHTML = html;
-    wrap.scrollTop = wrap.scrollHeight;
+    if (!filteredLines) {
+        document.getElementById('logs-more').innerHTML =
+            showMoreBar(_allLogs.length, _shownLogs, 'showMoreLogs', 'collapseLogs');
+    } else {
+        document.getElementById('logs-more').innerHTML = '';
+    }
 }
+
+function showMoreLogs(all) {
+    _shownLogs = all ? _allLogs.length : _shownLogs + PAGE_SIZE;
+    renderLogs();
+}
+function collapseLogs() { _shownLogs = PAGE_SIZE; renderLogs(); }
 
 function filterLogs(query) {
     if (!query) {
-        renderLogs(_allLogs);
+        renderLogs();
         return;
     }
     const q = query.toLowerCase();
@@ -505,9 +953,12 @@ function initTabs() {
             btn.classList.add('active');
             document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
             document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-            // load logs on first tab click
+            // load data on first tab click
             if (btn.dataset.tab === 'logs' && _allLogs.length === 0) {
                 refreshLogs();
+            }
+            if (btn.dataset.tab === 'failed' && _allFailed.length === 0) {
+                refreshFailed();
             }
         });
     });
@@ -521,8 +972,11 @@ function refreshAll() {
     refreshLoad();
     refreshAccounts();
     refreshChats();
-    refreshOperations();
     refreshFailovers();
+    // Обновляем failed requests если вкладка уже загружалась
+    if (_allFailed.length > 0 || document.querySelector('.tab-btn[data-tab="failed"].active')) {
+        refreshFailed();
+    }
     document.getElementById('last-update').textContent =
         'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
 }
@@ -538,4 +992,19 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     refreshAll();
     startAutoRefresh();
+
+    // Закрытие модалок по Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (_editingRequestId !== null) closeEditModal();
+            if (_chatOpsOpen) closeChatOpsModal();
+        }
+    });
+    // Закрытие по клику на оверлей
+    document.getElementById('edit-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'edit-modal') closeEditModal();
+    });
+    document.getElementById('chat-ops-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'chat-ops-modal') closeChatOpsModal();
+    });
 });

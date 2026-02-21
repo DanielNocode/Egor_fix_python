@@ -11,6 +11,7 @@ dashboard/routes.py — Flask-дашборд для Егора.
   - Управление: перезагрузка кэша, сброс ошибок, перезапуск платформы
 """
 import asyncio
+import json
 import os
 import subprocess
 import time
@@ -18,6 +19,7 @@ import logging
 from functools import wraps
 from typing import Optional
 
+import requests as http_requests
 from flask import Flask, render_template, jsonify, request, Response
 
 import config
@@ -89,7 +91,13 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     @app.route("/api/accounts")
     @requires_auth
     def api_accounts():
-        return jsonify({"accounts": _pool.all_statuses()})
+        statuses = _pool.all_statuses()
+        # Подтягиваем last_active из БД если в памяти 0 (после рестарта)
+        last_times = _registry.get_last_active_times()
+        for acc in statuses:
+            if not acc.get("last_active") and acc["account_name"] in last_times:
+                acc["last_active"] = last_times[acc["account_name"]]
+        return jsonify({"accounts": statuses})
 
     # --- API: services (сводка по каждому типу сервиса) ---
 
@@ -123,6 +131,7 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             "total_operations": db_stats["total_operations"],
             "total_errors": db_stats["total_errors"],
             "total_failovers": db_stats["total_failovers"],
+            "pending_retries": _registry.get_failed_requests_count(),
         })
 
     # --- API: load distribution ---
@@ -144,9 +153,115 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     @app.route("/api/chats")
     @requires_auth
     def api_chats():
-        limit = int(request.args.get("limit", 200))
+        limit = min(int(request.args.get("limit", 200)), 5000)
         chats = _registry.get_all_assignments(limit=limit)
         return jsonify({"chats": chats})
+
+    # --- API: sync dialogs from Telethon cache ---
+
+    @app.route("/api/sync_dialogs", methods=["POST"])
+    @requires_auth
+    def api_sync_dialogs():
+        """Подтянуть все группы/супергруппы из кэша Telethon в реестр."""
+        from telethon.tl.types import Channel, Chat
+        import datetime as _dt
+        added = 0
+        updated = 0
+        seen_ids = set()
+
+        # Собираем бриджи по приоритету (lowest priority number first)
+        bridges_sorted = sorted(
+            _pool.bridges.values(),
+            key=lambda b: b.priority,
+        )
+
+        for bridge in bridges_sorted:
+            if not bridge.is_healthy:
+                continue
+            for cached_id, entity in list(bridge._dialogs.items()):
+                # Только группы и супергруппы
+                if isinstance(entity, Channel):
+                    if not getattr(entity, "megagroup", False):
+                        continue  # пропускаем каналы (broadcast)
+                elif isinstance(entity, Chat):
+                    pass  # обычная группа
+                else:
+                    continue
+
+                eid = getattr(entity, "id", None)
+                if eid is None:
+                    continue
+
+                if isinstance(entity, Channel):
+                    chat_id = str(-1000000000000 - eid)
+                else:
+                    chat_id = str(-eid)
+
+                if chat_id in seen_ids:
+                    continue
+                seen_ids.add(chat_id)
+
+                title = getattr(entity, "title", "") or ""
+
+                # Реальная дата создания группы из Telegram
+                entity_date = getattr(entity, "date", None)
+                created_ts = None
+                if isinstance(entity_date, _dt.datetime):
+                    created_ts = entity_date.timestamp()
+
+                was_added = _registry.assign_if_not_exists(
+                    chat_id, bridge.account_name,
+                    title=title, created_at=created_ts,
+                )
+                if was_added:
+                    added += 1
+                    _registry.log_operation(
+                        bridge.account_name, chat_id,
+                        "sync", "ok",
+                        detail=f"Импортирован из кэша ({title})",
+                    )
+                else:
+                    # Обновляем дату и название для существующих
+                    _registry.update_chat_meta(
+                        chat_id, title=title, created_at=created_ts,
+                    )
+                    updated += 1
+
+        # Бэкфил операций: для чатов без единой операции записываем "sync"
+        backfilled = 0
+        conn = _registry._get_conn()
+        rows = conn.execute(
+            """SELECT ca.chat_id, ca.account_name, ca.title
+               FROM chat_assignments ca
+               LEFT JOIN operations_log ol ON ca.chat_id = ol.chat_id
+               WHERE ol.id IS NULL AND ca.status = 'active'"""
+        ).fetchall()
+        for row in rows:
+            _registry.log_operation(
+                row["account_name"], row["chat_id"],
+                "sync", "ok",
+                detail=f"Импортирован из кэша ({row['title'] or ''})",
+            )
+            backfilled += 1
+
+        # Проверяем: если чат есть в реестре, но НИ У КОГО в кэше — помечаем left
+        marked_left = 0
+        all_active = _registry.get_all_assignments(limit=10000)
+        for chat in all_active:
+            if chat["status"] != "active":
+                continue
+            if chat["chat_id"] not in seen_ids:
+                _registry.mark_left(chat["chat_id"])
+                marked_left += 1
+
+        return jsonify({
+            "status": "ok",
+            "added": added,
+            "updated": updated,
+            "backfilled": backfilled,
+            "marked_left": marked_left,
+            "total_seen": len(seen_ids),
+        })
 
     # --- API: operations log ---
 
@@ -155,6 +270,23 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     def api_operations():
         limit = int(request.args.get("limit", 100))
         ops = _registry.get_recent_operations(limit=limit)
+        # Тянем titles только для chat_id из текущей порции операций
+        chat_ids = list({op.get("chat_id", "") for op in ops if op.get("chat_id")})
+        titles = _registry.get_chat_titles(chat_ids) if chat_ids else {}
+        for op in ops:
+            op["chat_title"] = titles.get(op.get("chat_id", ""), "")
+        return jsonify({"operations": ops})
+
+    # --- API: operations by chat ---
+
+    @app.route("/api/operations_by_chat")
+    @requires_auth
+    def api_operations_by_chat():
+        chat_id = request.args.get("chat_id", "")
+        if not chat_id:
+            return jsonify({"error": "chat_id is required"}), 400
+        limit = int(request.args.get("limit", 100))
+        ops = _registry.get_operations_by_chat(chat_id, limit=limit)
         return jsonify({"operations": ops})
 
     # --- API: failover log ---
@@ -240,6 +372,175 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                 return jsonify({"error": str(e)}), 500
 
         return jsonify({"error": "unknown action"}), 400
+
+    # --- API: failed requests ---
+
+    @app.route("/api/failed_requests")
+    @requires_auth
+    def api_failed_requests():
+        limit = int(request.args.get("limit", 200))
+        items = _registry.get_failed_requests(limit=limit)
+        return jsonify({"failed_requests": items})
+
+    @app.route("/api/retry_request", methods=["POST"])
+    @requires_auth
+    def api_retry_request():
+        data = request.get_json(force=True) or {}
+        req_id = data.get("id")
+        if not req_id:
+            return jsonify({"error": "id is required"}), 400
+
+        item = _registry.get_failed_request_by_id(int(req_id))
+        if not item:
+            return jsonify({"error": "request not found"}), 404
+
+        # Если передан отредактированный payload — используем его и сохраняем
+        edited_payload = data.get("payload")
+        if edited_payload is not None:
+            try:
+                # Валидируем JSON
+                if isinstance(edited_payload, str):
+                    payload = json.loads(edited_payload)
+                else:
+                    payload = edited_payload
+                # Сохраняем в БД
+                _registry.update_failed_request_payload(
+                    int(req_id), json.dumps(payload, ensure_ascii=False),
+                )
+            except (json.JSONDecodeError, TypeError) as e:
+                return jsonify({"error": f"invalid JSON: {e}"}), 400
+        else:
+            try:
+                payload = json.loads(item["request_payload"])
+            except Exception:
+                return jsonify({"error": "invalid payload"}), 400
+
+        service = item["service"]
+        direction = item["direction"]
+
+        # Исходящий запрос (salebot) — просто переотправляем
+        if direction == "outbound":
+            try:
+                resp = http_requests.post(
+                    item["endpoint"], json=payload, timeout=15,
+                )
+                if resp.status_code < 400:
+                    _registry.update_failed_request(int(req_id), "retried")
+                    return jsonify({"status": "ok", "response_code": resp.status_code})
+                else:
+                    _registry.update_failed_request(
+                        int(req_id), "pending",
+                        last_retry_error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    )
+                    return jsonify({"status": "error", "error": f"HTTP {resp.status_code}"}), 502
+            except Exception as e:
+                _registry.update_failed_request(
+                    int(req_id), "pending", last_retry_error=str(e),
+                )
+                return jsonify({"status": "error", "error": str(e)}), 500
+
+        # Входящий запрос — перенаправляем на внутренний сервис
+        port_map = {
+            "create_chat": config.PORTS["create_chat"],
+            "send_text": config.PORTS["send_text"],
+            "send_media": config.PORTS["send_media"],
+            "leave_chat": config.PORTS["leave_chat"],
+        }
+        port = port_map.get(service)
+        if not port:
+            return jsonify({"error": f"unknown service: {service}"}), 400
+
+        endpoint = item["endpoint"] or f"/{service}"
+        url = f"http://localhost:{port}{endpoint}"
+
+        try:
+            resp = http_requests.post(url, json=payload, timeout=120)
+            resp_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+
+            if resp.status_code < 400 and resp_data.get("status") != "error":
+                _registry.update_failed_request(int(req_id), "retried")
+                return jsonify({"status": "ok", "service_response": resp_data})
+            else:
+                error_msg = resp_data.get("error", f"HTTP {resp.status_code}")
+                _registry.update_failed_request(
+                    int(req_id), "pending", last_retry_error=error_msg,
+                )
+                return jsonify({"status": "error", "error": error_msg}), resp.status_code
+        except Exception as e:
+            _registry.update_failed_request(
+                int(req_id), "pending", last_retry_error=str(e),
+            )
+            return jsonify({"status": "error", "error": str(e)}), 500
+
+    @app.route("/api/update_failed_payload", methods=["POST"])
+    @requires_auth
+    def api_update_failed_payload():
+        data = request.get_json(force=True) or {}
+        req_id = data.get("id")
+        new_payload = data.get("payload")
+        if not req_id or new_payload is None:
+            return jsonify({"error": "id and payload are required"}), 400
+
+        item = _registry.get_failed_request_by_id(int(req_id))
+        if not item:
+            return jsonify({"error": "request not found"}), 404
+
+        try:
+            # Валидируем JSON
+            if isinstance(new_payload, str):
+                parsed = json.loads(new_payload)
+            else:
+                parsed = new_payload
+            _registry.update_failed_request_payload(
+                int(req_id), json.dumps(parsed, ensure_ascii=False),
+            )
+            return jsonify({"status": "ok"})
+        except (json.JSONDecodeError, TypeError) as e:
+            return jsonify({"error": f"invalid JSON: {e}"}), 400
+
+    @app.route("/api/delete_failed", methods=["POST"])
+    @requires_auth
+    def api_delete_failed():
+        data = request.get_json(force=True) or {}
+        req_id = data.get("id")
+        if not req_id:
+            return jsonify({"error": "id is required"}), 400
+        _registry.delete_failed_request(int(req_id))
+        return jsonify({"status": "ok"})
+
+    # --- API: salebot callback ---
+
+    @app.route("/api/send_salebot_callback", methods=["POST"])
+    @requires_auth
+    def api_send_salebot_callback():
+        data = request.get_json(force=True) or {}
+        user_id = str(data.get("user_id", "")).strip()
+        invite_link = str(data.get("invite_link", "")).strip()
+        if not user_id or not invite_link:
+            return jsonify({"error": "user_id and invite_link are required"}), 400
+
+        payload = {
+            "message": "send_invite_link",
+            "user_id": user_id,
+            "group_id": config.SALEBOT_GROUP_ID,
+            "tg_business": 1,
+            "invite_link": invite_link,
+        }
+
+        try:
+            resp = http_requests.post(
+                config.SALEBOT_CALLBACK_URL,
+                json=payload,
+                timeout=15,
+            )
+            return jsonify({
+                "status": "ok" if resp.status_code < 400 else "error",
+                "response_code": resp.status_code,
+                "response_body": resp.text[:300],
+                "payload_sent": payload,
+            })
+        except Exception as e:
+            return jsonify({"status": "error", "error": str(e)}), 500
 
     # --- API: health ---
 
