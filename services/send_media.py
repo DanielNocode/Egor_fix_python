@@ -257,9 +257,9 @@ def send_media():
     except tl_errors.FloodWaitError as e:
         chat_str = str(user_id) if user_id else (username or "")
         _router.handle_error(bridge, e, chat_str, "send_media")
-        # Failover
-        fallback = _router.pool.get_next_healthy("send_media", exclude_key=bridge.name)
-        if fallback:
+        # Failover — пробуем все оставшиеся аккаунты
+        fallbacks = _router.pool.get_all_healthy_except("send_media", exclude_key=bridge.name)
+        for fallback in fallbacks:
             try:
                 entity, msgs = _run(
                     run_with_retry(
@@ -277,7 +277,7 @@ def send_media():
                     "count": len(msgs),
                 })
             except Exception:
-                pass
+                continue
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
 
     except tl_errors.FileReferenceExpiredError:
@@ -290,12 +290,12 @@ def send_media():
         return jsonify({"status": "error", "error": "Invalid peer (user_id/username)"}), 400
 
     except ValueError as e:
-        # Entity resolution failed — пробуем другой аккаунт
+        # Entity resolution failed — пробуем все оставшиеся аккаунты
         chat_str = str(user_id) if user_id else (username or "")
         if "Cannot resolve" in str(e):
             logger.warning("send_media: entity %s not found on %s, trying failover", chat_str, bridge.name)
-            fallback = _router.pool.get_next_healthy("send_media", exclude_key=bridge.name)
-            if fallback:
+            fallbacks = _router.pool.get_all_healthy_except("send_media", exclude_key=bridge.name)
+            for fallback in fallbacks:
                 try:
                     entity, msgs = _run(
                         run_with_retry(
@@ -313,7 +313,7 @@ def send_media():
                         "count": len(msgs),
                     })
                 except Exception:
-                    pass
+                    continue
         _router.handle_error(bridge, e, chat_str, "send_media")
         logger.error("send_media failed: %s: %s", type(e).__name__, e)
         return jsonify({"status": "error", "error": str(e)}), 500

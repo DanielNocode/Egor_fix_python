@@ -13,6 +13,7 @@ JSON запрос (не меняется):
 """
 import asyncio
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 import requests as http_requests
@@ -216,23 +217,26 @@ async def _create_chat_impl(bridge: TelethonBridge, title: str,
 # === Salebot callback =========================================================
 
 def _send_salebot_callback(client_tg_id: str, invite_link: str):
-    """Отправляет callback в salebot с invite_link после создания чата."""
-    payload = {
-        "message": "send_invite_link",
-        "user_id": client_tg_id,
-        "group_id": config.SALEBOT_GROUP_ID,
-        "tg_business": 1,
-        "invite_link": invite_link,
-    }
-    try:
-        resp = http_requests.post(
-            config.SALEBOT_CALLBACK_URL,
-            json=payload,
-            timeout=15,
-        )
-        logger.info("salebot callback sent: status=%s body=%s", resp.status_code, resp.text[:200])
-    except Exception as e:
-        logger.error("salebot callback failed: %s", e)
+    """Отправляет callback в salebot с invite_link (в фоновом потоке, не блокирует ответ)."""
+    def _do_send():
+        payload = {
+            "message": "send_invite_link",
+            "user_id": client_tg_id,
+            "group_id": config.SALEBOT_GROUP_ID,
+            "tg_business": 1,
+            "invite_link": invite_link,
+        }
+        try:
+            resp = http_requests.post(
+                config.SALEBOT_CALLBACK_URL,
+                json=payload,
+                timeout=15,
+            )
+            logger.info("salebot callback sent: status=%s body=%s", resp.status_code, resp.text[:200])
+        except Exception as e:
+            logger.error("salebot callback failed: %s", e)
+
+    threading.Thread(target=_do_send, daemon=True).start()
 
 
 # === HTTP endpoint ============================================================
@@ -286,9 +290,9 @@ def create_chat():
     except Exception as e:
         _router.handle_error(bridge, e, "", "create_chat")
 
-        # Попробовать failover
-        fallback = _router.pool.get_next_healthy("create_chat", exclude_key=bridge.name)
-        if fallback:
+        # Попробовать failover через ВСЕ оставшиеся здоровые аккаунты
+        fallbacks = _router.pool.get_all_healthy_except("create_chat", exclude_key=bridge.name)
+        for fallback in fallbacks:
             try:
                 logger.warning("create_chat failover: %s → %s", bridge.name, fallback.name)
                 result = _run(
@@ -308,7 +312,6 @@ def create_chat():
                         )
                     _router.handle_success(fallback, chat_id, "create_chat")
 
-                    # Отправляем callback в salebot (failover)
                     invite_link = result.get("invite_link") or ""
                     if client_tg_id and invite_link:
                         _send_salebot_callback(client_tg_id, invite_link)
@@ -316,5 +319,6 @@ def create_chat():
                     return jsonify(result)
             except Exception as e2:
                 _router.handle_error(fallback, e2, "", "create_chat")
+                continue
 
         return jsonify({"error": str(e)}), 500

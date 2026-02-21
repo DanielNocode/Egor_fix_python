@@ -70,6 +70,8 @@ class ChatRegistry:
             CREATE INDEX IF NOT EXISTS idx_ops_ts ON operations_log(ts);
             CREATE INDEX IF NOT EXISTS idx_ops_chat ON operations_log(chat_id);
             CREATE INDEX IF NOT EXISTS idx_fo_ts ON failover_log(ts);
+            CREATE INDEX IF NOT EXISTS idx_assign_account ON chat_assignments(account_name);
+            CREATE INDEX IF NOT EXISTS idx_ops_account ON operations_log(account_name);
         """)
         conn.commit()
 
@@ -143,9 +145,24 @@ class ChatRegistry:
         ).fetchall()
         return {row["account_name"]: row["cnt"] for row in rows}
 
-    def get_chat_titles(self) -> Dict[str, str]:
-        """Маппинг chat_id → title из chat_assignments."""
+    def get_chat_titles(self, chat_ids: Optional[list] = None) -> Dict[str, str]:
+        """Маппинг chat_id → title из chat_assignments.
+        Если chat_ids указаны — только для них (эффективнее при большом кол-ве чатов)."""
         conn = self._get_conn()
+        if chat_ids:
+            # SQLite ограничение: max 999 переменных в IN, разбиваем на чанки
+            result = {}
+            for i in range(0, len(chat_ids), 500):
+                chunk = chat_ids[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT chat_id, title FROM chat_assignments "
+                    f"WHERE title != '' AND chat_id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    result[row["chat_id"]] = row["title"]
+            return result
         rows = conn.execute(
             "SELECT chat_id, title FROM chat_assignments WHERE title != ''"
         ).fetchall()

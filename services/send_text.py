@@ -262,9 +262,9 @@ def send_text():
 
     except tl_errors.FloodWaitError as e:
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
-        # Failover
-        fallback = _router.pool.get_next_healthy("send_text", exclude_key=bridge.name)
-        if fallback:
+        # Failover — пробуем все оставшиеся аккаунты
+        fallbacks = _router.pool.get_all_healthy_except("send_text", exclude_key=bridge.name)
+        for fallback in fallbacks:
             try:
                 result = _run(
                     run_with_retry(
@@ -282,15 +282,15 @@ def send_text():
                 _router.handle_success(fallback, str(chat_ref), "send_text")
                 return jsonify(result)
             except Exception:
-                pass
+                continue
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
 
     except ValueError as e:
-        # Entity resolution failed — пробуем другой аккаунт
+        # Entity resolution failed — пробуем все оставшиеся аккаунты
         if "Cannot resolve" in str(e):
             logger.warning("send_text: entity %s not found on %s, trying failover", chat_ref, bridge.name)
-            fallback = _router.pool.get_next_healthy("send_text", exclude_key=bridge.name)
-            if fallback:
+            fallbacks = _router.pool.get_all_healthy_except("send_text", exclude_key=bridge.name)
+            for fallback in fallbacks:
                 try:
                     result = _run(
                         run_with_retry(
@@ -308,7 +308,7 @@ def send_text():
                     _router.handle_success(fallback, str(chat_ref), "send_text")
                     return jsonify(result)
                 except Exception:
-                    pass
+                    continue
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
         logger.error("send_text failed: %s: %s", type(e).__name__, e)
         return jsonify({"status": "error", "error": str(e)}), 500

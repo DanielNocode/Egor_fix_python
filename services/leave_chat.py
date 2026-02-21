@@ -33,7 +33,7 @@ def init(router: AccountRouter, loop: asyncio.AbstractEventLoop):
     _loop = loop
 
 
-def _run(coro, timeout=60):
+def _run(coro, timeout=180):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout=timeout)
 
 
@@ -82,6 +82,7 @@ async def _kick_all_members(bridge: TelethonBridge, channel_peer: Any) -> list:
                 ))
                 kicked.append(user.id)
                 logger.info("Kicked user %s (%s) from chat", user.id, user.username or "no_username")
+                await asyncio.sleep(0.5)  # пауза между кикам чтобы не словить FloodWait
             except Exception as e:
                 logger.warning("Failed to kick user %s: %s", user.id, e)
     except Exception as e:

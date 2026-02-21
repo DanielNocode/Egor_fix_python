@@ -161,7 +161,9 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     def api_operations():
         limit = int(request.args.get("limit", 100))
         ops = _registry.get_recent_operations(limit=limit)
-        titles = _registry.get_chat_titles()
+        # Тянем titles только для chat_id из текущей порции операций
+        chat_ids = list({op.get("chat_id", "") for op in ops if op.get("chat_id")})
+        titles = _registry.get_chat_titles(chat_ids) if chat_ids else {}
         for op in ops:
             op["chat_title"] = titles.get(op.get("chat_id", ""), "")
         return jsonify({"operations": ops})
