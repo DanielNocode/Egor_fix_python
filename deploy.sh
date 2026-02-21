@@ -2,13 +2,18 @@
 # deploy.sh — Полный деплой платформы Rumyantsev Telethon
 #
 # Запуск на сервере:
-#   cd /home/Egor/telethon/rumyantsev
+#   cd /root/Egor_fix_python
 #   bash deploy.sh
+#
+# БЕЗОПАСНЫЙ ДЕПЛОЙ:
+#   Заменяем только скрипты основного аккаунта (порты 5021-5024 + 5099).
+#   Старые backup create_chat (5025, 5029, 5030) и leave_chat_2 (5028)
+#   НЕ ТРОГАЕМ — они продолжат работать до перенастройки n8n/Make.
 #
 # Этапы:
 #   0. Проверка окружения
 #   1. Бэкап
-#   2. Создание сессий (если есть недостающие — ИНТЕРАКТИВНО)
+#   2. Проверка backup-сессий (create_chat)
 #   3. Остановка старых процессов на портах 5021-5024, 5099
 #   4. Создание systemd-сервиса
 #   5. Запуск платформы
@@ -105,39 +110,38 @@ done
 BACKUP_COUNT=$(ls "${BACKUP_DIR}/" 2>/dev/null | wc -l)
 ok "Бэкап: ${BACKUP_DIR} (${BACKUP_COUNT} файлов)"
 
-# ===== ШАГ 2: СОЗДАНИЕ НЕДОСТАЮЩИХ СЕССИЙ =====================================
+# ===== ШАГ 2: ПРОВЕРКА BACKUP-СЕССИЙ (create_chat) ============================
 
 step "ШАГ 2: Проверка backup-сессий"
 
-BACKUP_SESSIONS=("rum_send_text_2" "rum_media_2" "rum_leave_2"
-                  "rum_send_text_3" "rum_media_3" "rum_leave_3"
-                  "rum_send_text_4" "rum_media_4" "rum_leave_4")
+# На данном этапе backup-аккаунты используются ТОЛЬКО для create_chat.
+# send_text/send_media/leave_chat — только основной аккаунт.
+# Остальные сессии можно добавить позже через auth_sessions.py (Фаза 3).
+BACKUP_CREATE_SESSIONS=("rum_create_chat_2" "rum_create_chat_3" "rum_create_chat_4")
 MISSING=()
-for s in "${BACKUP_SESSIONS[@]}"; do
+for s in "${BACKUP_CREATE_SESSIONS[@]}"; do
     if [ ! -f "${WORK_DIR}/${s}.session" ]; then
         MISSING+=("$s")
+    else
+        ok "Сессия: ${s}.session"
     fi
 done
 
 if [ ${#MISSING[@]} -gt 0 ]; then
-    warn "Недостаёт ${#MISSING[@]} backup-сессий:"
+    warn "Недостаёт ${#MISSING[@]} backup create_chat сессий:"
     for s in "${MISSING[@]}"; do
         echo "  - ${s}.session"
     done
     echo ""
-    echo -e "${YELLOW}Без них failover работать НЕ БУДЕТ (только основной аккаунт).${NC}"
+    echo -e "${YELLOW}Без них create_chat будет работать только с основного аккаунта.${NC}"
+    echo -e "${YELLOW}Платформа запустится, но балансировка create_chat будет ограничена.${NC}"
     echo ""
-    read -p "Создать сейчас? Понадобятся коды из Telegram. (y/n): " CREATE
-    if [ "$CREATE" = "y" ]; then
-        cd "${WORK_DIR}"
-        $PYTHON "${REPO_DIR}/auth_sessions.py"
-        cd "${REPO_DIR}"
-    else
-        warn "Пропускаем. Failover будет ограничен."
-    fi
 else
-    ok "Все backup-сессии на месте"
+    ok "Все backup create_chat сессии на месте (${#BACKUP_CREATE_SESSIONS[@]} шт.)"
 fi
+
+info "Примечание: send_text/media/leave failover пока отключён (только основной аккаунт)."
+info "Для добавления backup-сессий: python ${REPO_DIR}/auth_sessions.py"
 
 # ===== ШАГ 3: ОСТАНОВКА СТАРЫХ ПРОЦЕССОВ =====================================
 
