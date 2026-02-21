@@ -102,5 +102,12 @@ FLOOD_WAIT_AUTO_SWITCH = 60     # если FloodWait > N сек, переклю�
 DASHBOARD_USER = os.environ.get("MONITOR_USER", "admin")
 DASHBOARD_PASS = os.environ.get("MONITOR_PASS", "telethon2026")
 
+# === Salebot Callback ========================================================
+SALEBOT_CALLBACK_URL = os.environ.get(
+    "SALEBOT_CALLBACK_URL",
+    "https://chatter.salebot.pro/api/17fb55a49883fb26bef73b6429fc4cf1/tg_callback",
+)
+SALEBOT_GROUP_ID = os.environ.get("SALEBOT_GROUP_ID", "alex_rumyansev_bot")
+
 # === Logging =================================================================
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")

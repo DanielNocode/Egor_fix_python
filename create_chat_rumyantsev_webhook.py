@@ -1,15 +1,22 @@
 import asyncio
+import logging
 import threading
 from typing import Any, Dict, List, Optional
 
+import requests as http_requests
 from flask import Flask, request, jsonify
 from telethon import TelegramClient, functions, types
 from telethon.utils import get_peer_id
+
+logger = logging.getLogger("legacy.create_chat")
 
 # === КОНФИГ ===============================================================
 API_ID = 36091011
 API_HASH = "72fa475b3b4f5124b9f165672dca423b"
 SESSION_PATH = "rumyantsev_create_chat"  # сессия нужного аккаунта
+
+SALEBOT_CALLBACK_URL = "https://chatter.salebot.pro/api/17fb55a49883fb26bef73b6429fc4cf1/tg_callback"
+SALEBOT_GROUP_ID = "alex_rumyansev_bot"
 
 # === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ================================================
 app = Flask(__name__)
@@ -157,6 +164,28 @@ def telethon_thread():
 
 threading.Thread(target=telethon_thread, name="telethon-loop", daemon=True).start()
 
+# === Salebot callback =====================================================
+
+def _send_salebot_callback(client_tg_id: str, invite_link: str):
+    """Отправляет callback в salebot с invite_link после создания чата."""
+    payload = {
+        "message": "send_invite_link",
+        "user_id": client_tg_id,
+        "group_id": SALEBOT_GROUP_ID,
+        "tg_business": 1,
+        "invite_link": invite_link,
+    }
+    try:
+        resp = http_requests.post(
+            SALEBOT_CALLBACK_URL,
+            json=payload,
+            timeout=15,
+        )
+        logger.info("salebot callback sent: status=%s body=%s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.error("salebot callback failed: %s", e)
+
+
 # === HTTP: создание супергруппы (без отправки сообщений) ==================
 @app.route("/create_chat", methods=["POST"])
 def create_chat():
@@ -164,7 +193,8 @@ def create_chat():
     JSON:
     {
       "title": "Тест-драйв. Имя. Дата",
-      "usernames": ["@acc1","@acc2"]   # клиент(ы) и бот(ы) в одном массиве
+      "usernames": ["@acc1","@acc2"],
+      "client_tg_id": "123456789"      # TG ID клиента для callback в salebot
     }
     """
     if _client is None:
@@ -173,6 +203,7 @@ def create_chat():
     data = request.get_json(force=True, silent=True) or {}
     title: str = (data.get("title") or "").strip()
     usernames: List[str] = data.get("usernames") or []
+    client_tg_id: str = str(data.get("client_tg_id") or "").strip()
 
     if not title:
         return jsonify({"error": "title is required"}), 400
@@ -269,7 +300,9 @@ def create_chat():
         invite_link = run_coro(export_invite_for_channel(_client, channel_peer), 20) or None
         debug["export_invite"] = "ok" if invite_link else "none"
 
-        # ВНИМАНИЕ: НИКАКИХ СООБЩЕНИЙ НЕ ОТПРАВЛЯЕМ
+        # Отправляем callback в salebot
+        if client_tg_id and invite_link:
+            _send_salebot_callback(client_tg_id, invite_link)
 
         return jsonify({
             "status": "ok",

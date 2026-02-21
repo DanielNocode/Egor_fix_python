@@ -3,69 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telethon Platform</title>
+    <title>Платформа Telethon — Панель управления</title>
     <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
     <header>
-        <h1>Telethon Platform</h1>
+        <h1>Панель управления</h1>
         <div class="header-right">
             <span id="last-update" class="muted"></span>
-            <button onclick="refreshAll()" class="btn btn-sm">Refresh</button>
+            <button onclick="refreshAll()" class="btn btn-sm">Обновить</button>
+            <button onclick="restartPlatform()" class="btn btn-sm btn-red">Перезапустить</button>
         </div>
     </header>
 
-    <!-- ALERTS -->
-    <div id="alerts-bar" class="alerts-bar hidden"></div>
+    <!-- NOTIFICATIONS -->
+    <div id="notifications"></div>
+
+    <!-- SERVICES -->
+    <section>
+        <h2>Сервисы</h2>
+        <div class="services-row" id="services-row"></div>
+    </section>
 
     <!-- SUMMARY -->
-    <section class="summary-row" id="summary-row">
-        <div class="summary-card">
-            <div class="summary-value" id="s-healthy">-</div>
-            <div class="summary-label">Healthy Accounts</div>
+    <section>
+        <div class="summary-row" id="summary-row">
+            <div class="summary-card">
+                <div class="summary-value" id="s-healthy">-</div>
+                <div class="summary-label">Аккаунты работают</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="s-chats">-</div>
+                <div class="summary-label">Активных чатов</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="s-ops">-</div>
+                <div class="summary-label">Всего операций</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="s-errors">-</div>
+                <div class="summary-label">Ошибок</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="s-failovers">-</div>
+                <div class="summary-label">Переключений</div>
+            </div>
         </div>
-        <div class="summary-card">
-            <div class="summary-value" id="s-chats">-</div>
-            <div class="summary-label">Active Chats</div>
-        </div>
-        <div class="summary-card">
-            <div class="summary-value" id="s-ops">-</div>
-            <div class="summary-label">Operations</div>
-        </div>
-        <div class="summary-card">
-            <div class="summary-value" id="s-errors">-</div>
-            <div class="summary-label">Errors</div>
-        </div>
-        <div class="summary-card">
-            <div class="summary-value" id="s-failovers">-</div>
-            <div class="summary-label">Failovers</div>
-        </div>
+    </section>
+
+    <!-- LOAD DISTRIBUTION -->
+    <section>
+        <h2>Распределение нагрузки</h2>
+        <div class="load-section" id="load-section"></div>
     </section>
 
     <!-- ACCOUNTS -->
     <section>
-        <h2>Accounts</h2>
+        <h2>Аккаунты</h2>
         <div class="cards" id="accounts-grid"></div>
     </section>
 
-    <!-- TABS: Chats / Operations / Failovers -->
+    <!-- TABS -->
     <section class="tabs-section">
         <div class="tab-buttons">
-            <button class="tab-btn active" data-tab="chats">Chats</button>
-            <button class="tab-btn" data-tab="operations">Operations</button>
-            <button class="tab-btn" data-tab="failovers">Failovers</button>
+            <button class="tab-btn active" data-tab="chats">Чаты</button>
+            <button class="tab-btn" data-tab="operations">Операции</button>
+            <button class="tab-btn" data-tab="failovers">Переключения</button>
+            <button class="tab-btn" data-tab="logs">Системные логи</button>
         </div>
 
+        <!-- TAB: Chats -->
         <div class="tab-content active" id="tab-chats">
+            <div class="search-bar">
+                <input type="text" id="search-chats" placeholder="Поиск по ID, названию, аккаунту..." oninput="filterTable('chats-tbody', this.value)">
+            </div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
-                            <th>Chat ID</th>
-                            <th>Title</th>
-                            <th>Account</th>
-                            <th>Created</th>
-                            <th>Status</th>
+                            <th>ID чата</th>
+                            <th>Название</th>
+                            <th>Аккаунт</th>
+                            <th>Создан</th>
+                            <th>Статус</th>
                         </tr>
                     </thead>
                     <tbody id="chats-tbody"></tbody>
@@ -73,17 +93,21 @@
             </div>
         </div>
 
+        <!-- TAB: Operations -->
         <div class="tab-content" id="tab-operations">
+            <div class="search-bar">
+                <input type="text" id="search-ops" placeholder="Поиск по аккаунту, чату, операции..." oninput="filterTable('ops-tbody', this.value)">
+            </div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
-                            <th>Time</th>
-                            <th>Account</th>
-                            <th>Chat</th>
-                            <th>Operation</th>
-                            <th>Status</th>
-                            <th>Detail</th>
+                            <th>Время</th>
+                            <th>Аккаунт</th>
+                            <th>Чат</th>
+                            <th>Операция</th>
+                            <th>Результат</th>
+                            <th>Подробности</th>
                         </tr>
                     </thead>
                     <tbody id="ops-tbody"></tbody>
@@ -91,21 +115,34 @@
             </div>
         </div>
 
+        <!-- TAB: Failovers -->
         <div class="tab-content" id="tab-failovers">
+            <div class="search-bar">
+                <input type="text" id="search-fo" placeholder="Поиск по чату, аккаунту..." oninput="filterTable('fo-tbody', this.value)">
+            </div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
-                            <th>Time</th>
-                            <th>Chat</th>
-                            <th>From</th>
-                            <th>To</th>
-                            <th>Reason</th>
+                            <th>Время</th>
+                            <th>Чат</th>
+                            <th>С аккаунта</th>
+                            <th>На аккаунт</th>
+                            <th>Причина</th>
                         </tr>
                     </thead>
                     <tbody id="fo-tbody"></tbody>
                 </table>
             </div>
+        </div>
+
+        <!-- TAB: Logs -->
+        <div class="tab-content" id="tab-logs">
+            <div class="search-bar">
+                <input type="text" id="search-logs" placeholder="Поиск в логах..." oninput="filterLogs(this.value)">
+                <button onclick="refreshLogs()" class="btn btn-sm">Обновить логи</button>
+            </div>
+            <div class="logs-wrap" id="logs-wrap"></div>
         </div>
     </section>
 

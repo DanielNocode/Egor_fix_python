@@ -3,14 +3,16 @@
 dashboard/routes.py — Flask-дашборд для Егора.
 
 Показывает:
-  - Статус каждого аккаунта (зелёный/жёлтый/красный)
-  - Список чатов с привязкой к аккаунтам
-  - Лог операций
-  - Лог фейловеров
-  - Управление: reload cache, сброс ошибок
+  - Статус каждого сервиса (Создание чатов, Отправка текста, и т.д.)
+  - Статус каждого аккаунта
+  - Распределение нагрузки по аккаунтам
+  - Список чатов, лог операций, лог фейловеров
+  - Системные логи (journalctl)
+  - Управление: перезагрузка кэша, сброс ошибок, перезапуск платформы
 """
 import asyncio
 import os
+import subprocess
 import time
 import logging
 from functools import wraps
@@ -89,6 +91,23 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     def api_accounts():
         return jsonify({"accounts": _pool.all_statuses()})
 
+    # --- API: services (сводка по каждому типу сервиса) ---
+
+    @app.route("/api/services")
+    @requires_auth
+    def api_services():
+        services = {}
+        for svc in config.SERVICE_TYPES:
+            bridges = _pool.service_statuses(svc)
+            healthy = sum(1 for b in bridges if b.get("is_healthy"))
+            total = len(bridges)
+            services[svc] = {
+                "healthy": healthy,
+                "total": total,
+                "status": "ok" if healthy > 0 else "down",
+            }
+        return jsonify({"services": services})
+
     # --- API: status (общая сводка) ---
 
     @app.route("/api/status")
@@ -105,6 +124,20 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             "total_errors": db_stats["total_errors"],
             "total_failovers": db_stats["total_failovers"],
         })
+
+    # --- API: load distribution ---
+
+    @app.route("/api/load")
+    @requires_auth
+    def api_load():
+        counts = _registry.get_account_chat_counts()
+        all_accounts = set()
+        for b in _pool.bridges.values():
+            all_accounts.add(b.account_name)
+        result = {}
+        for acc in sorted(all_accounts):
+            result[acc] = counts.get(acc, 0)
+        return jsonify({"load": result})
 
     # --- API: chats ---
 
@@ -133,6 +166,23 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
         fos = _registry.get_failover_log(limit=limit)
         return jsonify({"failovers": fos})
 
+    # --- API: system logs ---
+
+    @app.route("/api/logs")
+    @requires_auth
+    def api_logs():
+        n = min(int(request.args.get("n", 80)), 500)
+        try:
+            result = subprocess.run(
+                ["journalctl", "-u", "telethon-platform",
+                 "--no-pager", "-n", str(n), "--output", "short-iso"],
+                capture_output=True, text=True, timeout=5,
+            )
+            lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
+            return jsonify({"logs": lines})
+        except Exception as e:
+            return jsonify({"logs": [], "error": str(e)})
+
     # --- API: control ---
 
     @app.route("/api/control", methods=["POST"])
@@ -144,7 +194,6 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
 
         if action == "reload_cache":
             if account:
-                # account = bridge key like "main:create_chat"
                 bridge = _pool.get(account)
                 if not bridge:
                     return jsonify({"error": f"unknown bridge: {account}"}), 400
@@ -179,6 +228,16 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                     bridge.flood_until = 0
                     return jsonify({"status": "ok"})
             return jsonify({"error": "unknown bridge or not in flood"}), 400
+
+        elif action == "restart":
+            try:
+                subprocess.Popen(
+                    ["systemctl", "restart", "telethon-platform"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                return jsonify({"status": "ok"})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
 
         return jsonify({"error": "unknown action"}), 400
 
