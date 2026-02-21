@@ -225,6 +225,11 @@ def send_media():
     if not files or not isinstance(files, list):
         return jsonify({"status": "error", "error": "files must be a non-empty list"}), 400
 
+    # Проверяем, не вышли ли мы уже из этого чата
+    if user_id is not None and _router.registry.is_left(str(user_id)):
+        logger.info("send_media skipped: chat %s already left", user_id)
+        return jsonify({"status": "skipped", "reason": "chat already left"})
+
     # Выбираем аккаунт
     try:
         bridge = _router.pick_for_recipient(service="send_media", user_id=user_id, username=username)

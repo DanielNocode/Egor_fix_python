@@ -225,6 +225,11 @@ def send_text():
     if chat is None:
         return jsonify({"error": "chat is required"}), 400
 
+    # Проверяем, не вышли ли мы уже из этого чата
+    if _router.registry.is_left(str(chat)):
+        logger.info("send_text skipped: chat %s already left", chat)
+        return jsonify({"status": "skipped", "reason": "chat already left"})
+
     # Нормализуем chat в int если можно
     chat_ref = chat
     if isinstance(chat_ref, str) and chat_ref.strip().lstrip("-").isdigit():

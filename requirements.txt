@@ -1,3 +1,4 @@
 telethon>=1.36,<2.0
 flask>=2.2,<3.0
 werkzeug>=2.3
+requests>=2.28

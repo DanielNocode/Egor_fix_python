@@ -58,12 +58,44 @@ def _normalize_chat_ref(raw: Any) -> Any:
     return raw
 
 
+async def _kick_all_members(bridge: TelethonBridge, channel_peer: Any) -> list:
+    """Кикнуть всех участников (кроме себя) перед выходом из чата."""
+    kicked = []
+    my_id = bridge.self_user_id
+    try:
+        result = await bridge.client(functions.channels.GetParticipantsRequest(
+            channel=channel_peer,
+            filter=types.ChannelParticipantsRecent(),
+            offset=0, limit=200, hash=0,
+        ))
+        for user in result.users:
+            if user.id == my_id:
+                continue
+            try:
+                await bridge.client(functions.channels.EditBannedRequest(
+                    channel=channel_peer,
+                    participant=types.InputPeerUser(user.id, user.access_hash or 0),
+                    banned_rights=types.ChatBannedRights(
+                        until_date=0,
+                        view_messages=True,
+                    ),
+                ))
+                kicked.append(user.id)
+                logger.info("Kicked user %s (%s) from chat", user.id, user.username or "no_username")
+            except Exception as e:
+                logger.warning("Failed to kick user %s: %s", user.id, e)
+    except Exception as e:
+        logger.warning("Failed to get participants for kick: %s", e)
+    return kicked
+
+
 async def _leave_chat_impl(bridge: TelethonBridge, chat_ref: Any) -> dict:
     entity = await bridge.get_entity(chat_ref)
 
     if isinstance(entity, types.Channel):
+        kicked = await _kick_all_members(bridge, entity)
         await bridge.client(functions.channels.LeaveChannelRequest(entity))
-        return {"status": "ok", "left_type": "channel", "id": entity.id}
+        return {"status": "ok", "left_type": "channel", "id": entity.id, "kicked": kicked}
 
     if isinstance(entity, types.Chat):
         await bridge.client(
