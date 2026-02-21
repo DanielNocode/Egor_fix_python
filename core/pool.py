@@ -145,52 +145,34 @@ class AccountPool:
                 best = bridge
         return best
 
+    # Фиксированные веса для создания чатов (%)
+    CREATE_WEIGHTS = {
+        "main": 5,
+        "backup_1": 15,
+        "backup_2": 35,
+        "backup_3": 45,
+    }
+
     def get_weighted_balanced(self, service: str, chat_counts: Dict[str, int],
                               exclude_key: str = "") -> Optional[TelethonBridge]:
-        """Взвешенный выбор: main получает фиксированные 5%,
-        остальные 95% делятся между бэкапами по дефициту нагрузки."""
+        """Фиксированное распределение: main=5%, b1=15%, b2=35%, b3=45%.
+        Если аккаунт нездоров — его доля делится между остальными."""
         candidates = []
-        counts = []
+        weights = []
         for key in self._sorted_by_service.get(service, []):
             if key == exclude_key:
                 continue
             bridge = self.bridges[key]
             if not bridge.is_healthy:
                 continue
+            w = self.CREATE_WEIGHTS.get(bridge.account_name, 10)
             candidates.append(bridge)
-            counts.append(chat_counts.get(bridge.account_name, 0))
+            weights.append(w)
 
         if not candidates:
             return None
         if len(candidates) == 1:
             return candidates[0]
-
-        # main = 5%, остальные 95% по дефициту
-        MAIN_PCT = 0.05
-        main_indices = [i for i, b in enumerate(candidates) if b.account_name == "main"]
-        backup_indices = [i for i, b in enumerate(candidates) if b.account_name != "main"]
-
-        # Если main нет среди кандидатов — чисто дефицитная балансировка
-        if not main_indices:
-            max_count = max(counts)
-            weights = [max_count - c + 1 for c in counts]
-            return random.choices(candidates, weights=weights, k=1)[0]
-
-        # Если нет бэкапов — только main
-        if not backup_indices:
-            return candidates[main_indices[0]]
-
-        # Веса бэкапов по дефициту
-        backup_counts = [counts[i] for i in backup_indices]
-        max_backup = max(backup_counts)
-        backup_weights = [max_backup - c + 1 for c in backup_counts]
-        backup_total = sum(backup_weights)
-
-        # Финальные веса: main=5%, бэкапы делят 95%
-        weights = [0.0] * len(candidates)
-        weights[main_indices[0]] = MAIN_PCT
-        for idx, bi in enumerate(backup_indices):
-            weights[bi] = (1.0 - MAIN_PCT) * backup_weights[idx] / backup_total
 
         return random.choices(candidates, weights=weights, k=1)[0]
 
