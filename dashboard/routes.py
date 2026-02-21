@@ -89,7 +89,13 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     @app.route("/api/accounts")
     @requires_auth
     def api_accounts():
-        return jsonify({"accounts": _pool.all_statuses()})
+        statuses = _pool.all_statuses()
+        # Подтягиваем last_active из БД если в памяти 0 (после рестарта)
+        last_times = _registry.get_last_active_times()
+        for acc in statuses:
+            if not acc.get("last_active") and acc["account_name"] in last_times:
+                acc["last_active"] = last_times[acc["account_name"]]
+        return jsonify({"accounts": statuses})
 
     # --- API: services (сводка по каждому типу сервиса) ---
 

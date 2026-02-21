@@ -372,6 +372,23 @@ section > h2 { font-size: 1.1rem; margin-bottom: 12px; font-weight: 600; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
+/* ========== SHOW MORE ========== */
+.show-more-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    font-size: 0.82rem;
+}
+.btn-show-more {
+    background: var(--blue) !important;
+    color: #fff !important;
+}
+
 /* ========== TABLES ========== */
 .table-wrap {
     overflow-x: auto;

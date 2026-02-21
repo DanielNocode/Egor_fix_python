@@ -187,6 +187,16 @@ class ChatRegistry:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_last_active_times(self) -> Dict[str, float]:
+        """Последняя успешная операция для каждого аккаунта (из operations_log)."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT account_name, MAX(ts) as last_ts "
+            "FROM operations_log WHERE status = 'ok' "
+            "GROUP BY account_name"
+        ).fetchall()
+        return {row["account_name"]: row["last_ts"] for row in rows}
+
     # === Stats ================================================================
 
     def get_stats(self) -> Dict[str, Any]:

@@ -3,6 +3,15 @@
 let _autoTimer = null;
 let _allLogs = [];
 
+const PAGE_SIZE = 20;
+let _allChats = [];
+let _allOps = [];
+let _allFos = [];
+let _shownChats = PAGE_SIZE;
+let _shownOps = PAGE_SIZE;
+let _shownFos = PAGE_SIZE;
+let _shownLogs = PAGE_SIZE;
+
 /* ========== ПЕРЕВОД ОШИБОК ========== */
 
 const ERROR_TRANSLATIONS = [
@@ -361,105 +370,174 @@ function restartPlatform() {
     .catch(e => alert('Ошибка перезапуска: ' + e));
 }
 
+/* ========== SHOW MORE HELPERS ========== */
+
+function showMoreBar(total, shown, showMoreFn, collapseFn) {
+    if (total === 0) return '';
+    if (total <= PAGE_SIZE) return '';
+    if (shown < total) {
+        const remaining = total - shown;
+        const next = Math.min(PAGE_SIZE, remaining);
+        return `<div class="show-more-bar">
+            <span class="muted">Показано ${shown} из ${total}</span>
+            <button class="btn btn-sm btn-show-more" onclick="${showMoreFn}()">Показать ещё ${next}</button>
+            <button class="btn btn-sm" onclick="${showMoreFn}(true)">Показать все</button>
+        </div>`;
+    }
+    return `<div class="show-more-bar">
+        <span class="muted">Показаны все ${total}</span>
+        <button class="btn btn-sm" onclick="${collapseFn}()">Свернуть</button>
+    </div>`;
+}
+
 /* ========== CHATS ========== */
 
 function refreshChats() {
-    fetch('/api/chats?limit=200')
+    fetch('/api/chats?limit=500')
         .then(r => r.json())
         .then(data => {
-            const tbody = document.getElementById('chats-tbody');
-            let html = '';
-            for (const c of data.chats) {
-                const statusText = c.status === 'active' ? 'Активен' : 'Покинут';
-                const cls = c.status === 'active' ? 'status-active' : 'status-left';
-                html += `<tr>
-                    <td>${esc(c.chat_id)}</td>
-                    <td>${esc(c.title)}</td>
-                    <td>${esc(c.account_name)}</td>
-                    <td>${fmtTime(c.created_at)}</td>
-                    <td class="${cls}">${statusText}</td>
-                </tr>`;
-            }
-            tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Чатов пока нет</td></tr>';
+            _allChats = data.chats || [];
+            _shownChats = PAGE_SIZE;
+            renderChats();
         })
         .catch(() => {});
 }
+
+function renderChats() {
+    const tbody = document.getElementById('chats-tbody');
+    const showing = _allChats.slice(0, _shownChats);
+    let html = '';
+    for (const c of showing) {
+        const statusText = c.status === 'active' ? 'Активен' : 'Покинут';
+        const cls = c.status === 'active' ? 'status-active' : 'status-left';
+        html += `<tr>
+            <td>${esc(c.chat_id)}</td>
+            <td>${esc(c.title)}</td>
+            <td>${esc(c.account_name)}</td>
+            <td>${fmtTime(c.created_at)}</td>
+            <td class="${cls}">${statusText}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Чатов пока нет</td></tr>';
+    document.getElementById('chats-more').innerHTML =
+        showMoreBar(_allChats.length, _shownChats, 'showMoreChats', 'collapseChats');
+}
+
+function showMoreChats(all) {
+    _shownChats = all ? _allChats.length : _shownChats + PAGE_SIZE;
+    renderChats();
+}
+function collapseChats() { _shownChats = PAGE_SIZE; renderChats(); }
 
 /* ========== OPERATIONS ========== */
 
 function refreshOperations() {
-    fetch('/api/operations?limit=100')
+    fetch('/api/operations?limit=500')
         .then(r => r.json())
         .then(data => {
-            const tbody = document.getElementById('ops-tbody');
-            let html = '';
-            for (const op of data.operations) {
-                let cls = '';
-                if (op.status === 'ok') cls = 'status-ok';
-                else if (op.status === 'error' || op.status === 'banned') cls = 'status-error';
-                else if (op.status === 'flood_wait') cls = 'status-flood';
-
-                const detail = op.detail ? translateError(op.detail) : null;
-                const detailText = detail ? detail.text : (op.detail || '');
-
-                html += `<tr>
-                    <td>${fmtTime(op.ts)}</td>
-                    <td>${esc(op.account_name)}</td>
-                    <td>${esc(op.chat_id)}</td>
-                    <td>${esc(SERVICE_NAMES[op.operation] || op.operation)}</td>
-                    <td class="${cls}">${opStatusRu(op.status)}</td>
-                    <td class="detail" title="${esc(op.detail || '')}">${esc(detailText.substring(0, 60))}</td>
-                </tr>`;
-            }
-            tbody.innerHTML = html || '<tr><td colspan="6" class="empty-row">Операций пока нет</td></tr>';
+            _allOps = data.operations || [];
+            _shownOps = PAGE_SIZE;
+            renderOps();
         })
         .catch(() => {});
 }
+
+function renderOps() {
+    const tbody = document.getElementById('ops-tbody');
+    const showing = _allOps.slice(0, _shownOps);
+    let html = '';
+    for (const op of showing) {
+        let cls = '';
+        if (op.status === 'ok') cls = 'status-ok';
+        else if (op.status === 'error' || op.status === 'banned') cls = 'status-error';
+        else if (op.status === 'flood_wait') cls = 'status-flood';
+
+        const detail = op.detail ? translateError(op.detail) : null;
+        const detailText = detail ? detail.text : (op.detail || '');
+
+        html += `<tr>
+            <td>${fmtTime(op.ts)}</td>
+            <td>${esc(op.account_name)}</td>
+            <td>${esc(op.chat_id)}</td>
+            <td>${esc(SERVICE_NAMES[op.operation] || op.operation)}</td>
+            <td class="${cls}">${opStatusRu(op.status)}</td>
+            <td class="detail" title="${esc(op.detail || '')}">${esc(detailText.substring(0, 60))}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html || '<tr><td colspan="6" class="empty-row">Операций пока нет</td></tr>';
+    document.getElementById('ops-more').innerHTML =
+        showMoreBar(_allOps.length, _shownOps, 'showMoreOps', 'collapseOps');
+}
+
+function showMoreOps(all) {
+    _shownOps = all ? _allOps.length : _shownOps + PAGE_SIZE;
+    renderOps();
+}
+function collapseOps() { _shownOps = PAGE_SIZE; renderOps(); }
 
 /* ========== FAILOVERS ========== */
 
 function refreshFailovers() {
-    fetch('/api/failovers?limit=50')
+    fetch('/api/failovers?limit=500')
         .then(r => r.json())
         .then(data => {
-            const tbody = document.getElementById('fo-tbody');
-            let html = '';
-            for (const fo of data.failovers) {
-                const reason = fo.reason ? translateError(fo.reason) : null;
-                const reasonText = reason ? reason.text : (fo.reason || '');
-                html += `<tr>
-                    <td>${fmtTime(fo.ts)}</td>
-                    <td>${esc(fo.chat_id)}</td>
-                    <td>${esc(fo.from_account)}</td>
-                    <td>${esc(fo.to_account)}</td>
-                    <td class="detail" title="${esc(fo.reason || '')}">${esc(reasonText.substring(0, 60))}</td>
-                </tr>`;
-            }
-            tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Переключений пока не было</td></tr>';
+            _allFos = data.failovers || [];
+            _shownFos = PAGE_SIZE;
+            renderFos();
         })
         .catch(() => {});
 }
+
+function renderFos() {
+    const tbody = document.getElementById('fo-tbody');
+    const showing = _allFos.slice(0, _shownFos);
+    let html = '';
+    for (const fo of showing) {
+        const reason = fo.reason ? translateError(fo.reason) : null;
+        const reasonText = reason ? reason.text : (fo.reason || '');
+        html += `<tr>
+            <td>${fmtTime(fo.ts)}</td>
+            <td>${esc(fo.chat_id)}</td>
+            <td>${esc(fo.from_account)}</td>
+            <td>${esc(fo.to_account)}</td>
+            <td class="detail" title="${esc(fo.reason || '')}">${esc(reasonText.substring(0, 60))}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html || '<tr><td colspan="5" class="empty-row">Переключений пока не было</td></tr>';
+    document.getElementById('fo-more').innerHTML =
+        showMoreBar(_allFos.length, _shownFos, 'showMoreFos', 'collapseFos');
+}
+
+function showMoreFos(all) {
+    _shownFos = all ? _allFos.length : _shownFos + PAGE_SIZE;
+    renderFos();
+}
+function collapseFos() { _shownFos = PAGE_SIZE; renderFos(); }
 
 /* ========== LOGS ========== */
 
 function refreshLogs() {
-    fetch('/api/logs?n=80')
+    fetch('/api/logs?n=200')
         .then(r => r.json())
         .then(data => {
             _allLogs = data.logs || [];
-            renderLogs(_allLogs);
+            _shownLogs = PAGE_SIZE;
+            renderLogs();
         })
         .catch(() => {});
 }
 
-function renderLogs(lines) {
+function renderLogs(filteredLines) {
+    const lines = filteredLines || _allLogs;
     const wrap = document.getElementById('logs-wrap');
     if (lines.length === 0) {
         wrap.innerHTML = '<div class="empty-row">Логов пока нет</div>';
+        document.getElementById('logs-more').innerHTML = '';
         return;
     }
+    const showing = lines.slice(0, filteredLines ? lines.length : _shownLogs);
     let html = '';
-    for (const line of lines) {
+    for (const line of showing) {
         let cls = '';
         if (/ERROR/i.test(line)) cls = 'log-error';
         else if (/WARNING/i.test(line)) cls = 'log-warn';
@@ -467,12 +545,23 @@ function renderLogs(lines) {
         html += `<div class="log-line ${cls}">${esc(line)}</div>`;
     }
     wrap.innerHTML = html;
-    wrap.scrollTop = wrap.scrollHeight;
+    if (!filteredLines) {
+        document.getElementById('logs-more').innerHTML =
+            showMoreBar(_allLogs.length, _shownLogs, 'showMoreLogs', 'collapseLogs');
+    } else {
+        document.getElementById('logs-more').innerHTML = '';
+    }
 }
+
+function showMoreLogs(all) {
+    _shownLogs = all ? _allLogs.length : _shownLogs + PAGE_SIZE;
+    renderLogs();
+}
+function collapseLogs() { _shownLogs = PAGE_SIZE; renderLogs(); }
 
 function filterLogs(query) {
     if (!query) {
-        renderLogs(_allLogs);
+        renderLogs();
         return;
     }
     const q = query.toLowerCase();
