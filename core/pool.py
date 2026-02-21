@@ -32,6 +32,7 @@ class AccountPool:
 
     async def start_all(self):
         """Создаём и запускаем bridge'и для каждой пары (аккаунт, сервис)."""
+        # 1. Create all bridges
         for acc in sorted(config.ACCOUNTS, key=lambda a: a["priority"]):
             acc_name = acc["name"]
             sessions = acc.get("sessions", {})
@@ -54,11 +55,18 @@ class AccountPool:
                     self._sorted_by_service[service] = []
                 self._sorted_by_service[service].append(bridge_key)
 
-                try:
-                    await bridge.start()
-                    self._loop.create_task(bridge.periodic_warmup())
-                except Exception as e:
-                    logger.error("Failed to start bridge %s: %s", bridge_key, e)
+        # 2. Start all bridges in parallel (each has ~30s flood wait on cache warmup)
+        async def _safe_start(key, bridge):
+            try:
+                await bridge.start()
+                self._loop.create_task(bridge.periodic_warmup())
+            except Exception as e:
+                logger.error("Failed to start bridge %s: %s", key, e)
+
+        logger.info("Starting %d bridges in parallel...", len(self.bridges))
+        await asyncio.gather(
+            *[_safe_start(k, b) for k, b in self.bridges.items()]
+        )
 
         total = len(self.bridges)
         healthy = sum(1 for b in self.bridges.values() if b.is_healthy)
@@ -110,6 +118,23 @@ class AccountPool:
         """Получить bridge конкретного аккаунта для конкретного сервиса."""
         key = f"{account_name}:{service}"
         return self.bridges.get(key)
+
+    def get_least_loaded(self, service: str, chat_counts: Dict[str, int],
+                         exclude_key: str = "") -> Optional[TelethonBridge]:
+        """Здоровый bridge с наименьшим количеством активных чатов."""
+        best = None
+        best_count = float("inf")
+        for key in self._sorted_by_service.get(service, []):
+            if key == exclude_key:
+                continue
+            bridge = self.bridges[key]
+            if not bridge.is_healthy:
+                continue
+            count = chat_counts.get(bridge.account_name, 0)
+            if count < best_count:
+                best_count = count
+                best = bridge
+        return best
 
     # === Информация ===========================================================
 

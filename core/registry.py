@@ -126,6 +126,15 @@ class ChatRegistry:
         ).fetchone()
         return row["cnt"]
 
+    def get_account_chat_counts(self) -> Dict[str, int]:
+        """Количество активных чатов на каждый аккаунт."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT account_name, COUNT(*) as cnt FROM chat_assignments "
+            "WHERE status = 'active' GROUP BY account_name"
+        ).fetchall()
+        return {row["account_name"]: row["cnt"] for row in rows}
+
     # === Operations Log =======================================================
 
     def log_operation(self, account_name: str, chat_id: str,

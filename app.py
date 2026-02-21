@@ -146,15 +146,15 @@ def main():
     )
     tg_thread.start()
 
-    # Ждём пока pool стартанёт
+    # Ждём пока pool стартанёт (16 bridges с flood wait ~30s each, but parallel)
     logger.info("Waiting for Telethon bridges to start...")
-    for _ in range(120):  # max 120 секунд
+    for _ in range(300):  # max 300 секунд (5 мин)
         if _router is not None:
             break
         time.sleep(1)
 
     if _router is None:
-        logger.error("Telethon bridges failed to start within 120s, exiting")
+        logger.error("Telethon bridges failed to start within 300s, exiting")
         sys.exit(1)
 
     logger.info("Router ready, starting HTTP servers...")
