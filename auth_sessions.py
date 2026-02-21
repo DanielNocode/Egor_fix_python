@@ -57,11 +57,20 @@ def check_existing_sessions():
             if session_name:
                 path = get_session_path(session_name)
                 exists = os.path.exists(path)
-                status = "OK" if exists else "MISSING"
-                symbol = "+" if exists else "!"
-                print(f"    [{symbol}] {svc:15s} -> {session_name}.session  [{status}]")
-                if not exists:
+                if exists:
+                    size = os.path.getsize(path)
+                    if size > 28672:
+                        status = f"OK ({size}b)"
+                        symbol = "+"
+                    else:
+                        status = f"EMPTY STUB ({size}b)"
+                        symbol = "!"
+                        missing.append((acc, svc, session_name))
+                else:
+                    status = "MISSING"
+                    symbol = "!"
                     missing.append((acc, svc, session_name))
+                print(f"    [{symbol}] {svc:15s} -> {session_name}.session  [{status}]")
             else:
                 print(f"    [-] {svc:15s} -> (not in config.py)")
                 missing.append((acc, svc, None))
@@ -86,6 +95,18 @@ async def create_session(acc, svc, session_name):
     print(f"  API_ID:   {acc['api_id']}")
     print(f"  Service:  {svc}")
     print(f"{'=' * 70}")
+
+    session_path = f"{session_name}.session"
+
+    # Remove empty stub files (28672 bytes = empty Telethon SQLite)
+    # to avoid "database is locked" errors from other processes
+    if os.path.exists(session_path):
+        size = os.path.getsize(session_path)
+        if size <= 28672:
+            print(f"  Removing empty stub ({size}b)...")
+            os.remove(session_path)
+        else:
+            print(f"  File already exists ({size}b), checking auth...")
 
     client = TelegramClient(session_name, acc["api_id"], acc["api_hash"])
 
@@ -122,7 +143,18 @@ async def create_session(acc, svc, session_name):
             me = await client.get_me()
             print(f"\nAuthorized as @{me.username} ({me.phone})")
 
-        print(f"Session file: {session_name}.session")
+        # Force save session to disk
+        client.session.save()
+
+        # Verify file was actually written
+        if os.path.exists(session_path):
+            final_size = os.path.getsize(session_path)
+            if final_size > 28672:
+                print(f"Session SAVED: {session_path} ({final_size}b)")
+            else:
+                print(f"WARNING: Session file is still small ({final_size}b) - auth may not have saved!")
+        else:
+            print(f"WARNING: Session file not found after auth!")
 
     finally:
         await client.disconnect()
