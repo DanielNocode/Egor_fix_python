@@ -12,13 +12,19 @@ import asyncio
 import os
 import sys
 
-# Fix encoding for non-UTF-8 terminals
+# Fix encoding: always force UTF-8 with error handling on all streams
 import io
-if sys.stdout.encoding != "utf-8":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-if sys.stdin.encoding != "utf-8":
-    sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
+
+
+def safe_input(prompt=""):
+    """Read input safely, handling any encoding issues."""
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    raw = sys.stdin.buffer.readline()
+    return raw.decode("utf-8", errors="replace").strip()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import ACCOUNTS, SERVICE_TYPES
@@ -51,11 +57,20 @@ def check_existing_sessions():
             if session_name:
                 path = get_session_path(session_name)
                 exists = os.path.exists(path)
-                status = "OK" if exists else "MISSING"
-                symbol = "+" if exists else "!"
-                print(f"    [{symbol}] {svc:15s} -> {session_name}.session  [{status}]")
-                if not exists:
+                if exists:
+                    size = os.path.getsize(path)
+                    if size > 28672:
+                        status = f"OK ({size}b)"
+                        symbol = "+"
+                    else:
+                        status = f"EMPTY STUB ({size}b)"
+                        symbol = "!"
+                        missing.append((acc, svc, session_name))
+                else:
+                    status = "MISSING"
+                    symbol = "!"
                     missing.append((acc, svc, session_name))
+                print(f"    [{symbol}] {svc:15s} -> {session_name}.session  [{status}]")
             else:
                 print(f"    [-] {svc:15s} -> (not in config.py)")
                 missing.append((acc, svc, None))
@@ -81,6 +96,18 @@ async def create_session(acc, svc, session_name):
     print(f"  Service:  {svc}")
     print(f"{'=' * 70}")
 
+    session_path = f"{session_name}.session"
+
+    # Remove empty stub files (28672 bytes = empty Telethon SQLite)
+    # to avoid "database is locked" errors from other processes
+    if os.path.exists(session_path):
+        size = os.path.getsize(session_path)
+        if size <= 28672:
+            print(f"  Removing empty stub ({size}b)...")
+            os.remove(session_path)
+        else:
+            print(f"  File already exists ({size}b), checking auth...")
+
     client = TelegramClient(session_name, acc["api_id"], acc["api_hash"])
 
     try:
@@ -94,14 +121,14 @@ async def create_session(acc, svc, session_name):
             print(f"\nSending code to {acc['phone']}...")
             await client.send_code_request(acc["phone"])
 
-            code = input("Enter Telegram code: ").strip()
+            code = safe_input("Enter Telegram code: ")
 
             try:
                 await client.sign_in(acc["phone"], code)
             except Exception as e:
                 err_str = str(e)
                 if "Two-step verification" in err_str or "password" in err_str.lower():
-                    password = input("2FA password required: ").strip()
+                    password = safe_input("2FA password required: ")
                     try:
                         await client.sign_in(password=password)
                     except UnicodeDecodeError as ue:
@@ -116,7 +143,18 @@ async def create_session(acc, svc, session_name):
             me = await client.get_me()
             print(f"\nAuthorized as @{me.username} ({me.phone})")
 
-        print(f"Session file: {session_name}.session")
+        # Force save session to disk
+        client.session.save()
+
+        # Verify file was actually written
+        if os.path.exists(session_path):
+            final_size = os.path.getsize(session_path)
+            if final_size > 28672:
+                print(f"Session SAVED: {session_path} ({final_size}b)")
+            else:
+                print(f"WARNING: Session file is still small ({final_size}b) - auth may not have saved!")
+        else:
+            print(f"WARNING: Session file not found after auth!")
 
     finally:
         await client.disconnect()
@@ -158,7 +196,7 @@ async def main():
     for acc, svc, name in to_create:
         print(f"  - {acc['name']} / {svc} -> {name}.session")
 
-    answer = input("\nContinue? (y/n): ").strip().lower()
+    answer = safe_input("\nContinue? (y/n): ").lower()
     if answer != "y":
         print("Cancelled.")
         return
@@ -168,7 +206,7 @@ async def main():
             await create_session(acc, svc, name)
         except Exception as e:
             print(f"\nERROR creating {name}: {e}")
-            skip = input("Skip and continue? (y/n): ").strip().lower()
+            skip = safe_input("Skip and continue? (y/n): ").lower()
             if skip != "y":
                 print("Aborted.")
                 return
