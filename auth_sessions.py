@@ -41,25 +41,26 @@ def get_session_path(session_name):
     return f"{session_name}.session"
 
 
-async def check_session_auth(session_name, api_id, api_hash):
-    """Check if a session file is actually authorized by connecting to it."""
+def check_session_auth_sqlite(session_name):
+    """Check if a session has auth_key by reading SQLite directly (no Telegram connection)."""
+    import sqlite3
     path = get_session_path(session_name)
     if not os.path.exists(path):
         return "MISSING", None
     try:
-        client = TelegramClient(session_name, api_id, api_hash)
-        await client.connect()
-        if await client.is_user_authorized():
-            me = await client.get_me()
-            await client.disconnect()
-            return "OK", me.username or me.first_name
-        await client.disconnect()
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+        cur = conn.cursor()
+        cur.execute("SELECT auth_key FROM sessions LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0] and len(row[0]) > 0:
+            return "OK", f"{len(row[0])}b key"
         return "NOT_AUTH", None
     except Exception as e:
         return "ERROR", str(e)
 
 
-async def check_existing_sessions():
+def check_existing_sessions():
     print("\n" + "=" * 70)
     print("SESSION STATUS")
     print("=" * 70)
@@ -73,9 +74,7 @@ async def check_existing_sessions():
         for svc in SERVICE_TYPES:
             session_name = acc["sessions"].get(svc)
             if session_name:
-                status, detail = await check_session_auth(
-                    session_name, acc["api_id"], acc["api_hash"]
-                )
+                status, detail = check_session_auth_sqlite(session_name)
                 if status == "OK":
                     print(f"    [+] {svc:15s} -> {session_name}.session  [OK @{detail}]")
                 elif status == "MISSING":
@@ -190,7 +189,7 @@ async def main():
         print(f"\nWARNING: Sessions are searched in {cwd}")
         print(f"If sessions are in /root/, run this script from /root/")
 
-    missing = await check_existing_sessions()
+    missing = check_existing_sessions()
 
     if not missing:
         print("\nAll sessions authorized. Done.")
@@ -231,7 +230,7 @@ async def main():
 
     print(f"\n{'=' * 70}")
     print("DONE! Final status:")
-    await check_existing_sessions()
+    check_existing_sessions()
 
 
 if __name__ == "__main__":
