@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-core/router.py — AccountRouter: выбор аккаунта + failover.
+core/router.py — AccountRouter: выбор аккаунта + failover + балансировка.
 
 Логика:
-  1. create_chat  → берём лучший свободный bridge для сервиса create_chat
-  2. send_text / send_media / leave_chat → ищем привязанный аккаунт,
-     берём его bridge для нужного сервиса
-     → если он нездоров → failover на следующий bridge того же сервиса
+  1. create_chat  → least-loaded: аккаунт с наименьшим числом активных чатов
+  2. send_text / send_media / leave_chat → привязанный аккаунт (из registry),
+     если нездоров → failover на least-loaded
+     если привязки нет → least-loaded
 """
 import logging
 from typing import Optional
@@ -22,19 +22,29 @@ logger = logging.getLogger("core.router")
 
 
 class AccountRouter:
-    """Роутер: связывает pool + registry. Все методы принимают service."""
+    """Роутер: связывает pool + registry. Балансировка по числу чатов."""
 
     def __init__(self, pool: AccountPool, registry: ChatRegistry):
         self.pool = pool
         self.registry = registry
 
+    def _pick_least_loaded(self, service: str,
+                           exclude_key: str = "") -> Optional[TelethonBridge]:
+        """Выбрать здоровый bridge с наименьшим количеством активных чатов."""
+        counts = self.registry.get_account_chat_counts()
+        return self.pool.get_least_loaded(service, counts, exclude_key)
+
     # === Для create_chat ======================================================
 
     def pick_for_create(self, service: str = "create_chat") -> TelethonBridge:
-        """Выбрать лучший здоровый bridge для создания чата."""
-        bridge = self.pool.get_best(service)
+        """Выбрать bridge с наименьшей нагрузкой для создания чата."""
+        bridge = self._pick_least_loaded(service)
         if bridge is None:
             raise RuntimeError(f"No healthy accounts for service={service}")
+        logger.info(
+            "Balanced pick for %s → %s (account=%s)",
+            service, bridge.name, bridge.account_name,
+        )
         return bridge
 
     # === Для send_text / send_media / leave_chat ==============================
@@ -44,8 +54,8 @@ class AccountRouter:
         Выбрать bridge для операции с чатом.
         1. Ищем привязку chat_id → account_name
         2. Берём bridge этого аккаунта для нужного сервиса
-        3. Если нездоров → failover на другой bridge того же сервиса
-        4. Если привязки нет → берём лучший доступный bridge для сервиса
+        3. Если нездоров → failover на least-loaded bridge того же сервиса
+        4. Если привязки нет → least-loaded bridge для сервиса
         """
         chat_str = str(chat_id)
         assigned_account = self.registry.get_account(chat_str)
@@ -55,10 +65,10 @@ class AccountRouter:
             if bridge and bridge.is_healthy:
                 return bridge
 
-            # Failover внутри того же сервиса
+            # Failover — берём least-loaded вместо просто "следующего"
             current_key = f"{assigned_account}:{service}"
             reason = "no bridge" if not bridge else f"status={bridge.status}"
-            new_bridge = self.pool.get_next_healthy(service, exclude_key=current_key)
+            new_bridge = self._pick_least_loaded(service, exclude_key=current_key)
             if new_bridge is None:
                 # Даже если нездоров — пробуем привязанный
                 if bridge:
@@ -77,8 +87,8 @@ class AccountRouter:
             )
             return new_bridge
 
-        # Нет привязки — берём лучший для сервиса
-        bridge = self.pool.get_best(service)
+        # Нет привязки — least-loaded
+        bridge = self._pick_least_loaded(service)
         if bridge is None:
             raise RuntimeError(f"No healthy accounts for service={service}")
         return bridge
@@ -90,7 +100,7 @@ class AccountRouter:
         """
         Для отправки медиа — может быть как группа, так и личка.
         Если user_id есть в реестре чатов → используем привязанный аккаунт.
-        Иначе → лучший доступный bridge для сервиса.
+        Иначе → least-loaded bridge для сервиса.
         """
         if user_id is not None:
             chat_str = str(user_id)
@@ -99,9 +109,9 @@ class AccountRouter:
                 bridge = self.pool.get_by_account(assigned, service)
                 if bridge and bridge.is_healthy:
                     return bridge
-                # Failover
+                # Failover на least-loaded
                 current_key = f"{assigned}:{service}"
-                new_bridge = self.pool.get_next_healthy(
+                new_bridge = self._pick_least_loaded(
                     service, exclude_key=current_key,
                 )
                 if new_bridge:
@@ -114,7 +124,7 @@ class AccountRouter:
                 if bridge:
                     return bridge
 
-        bridge = self.pool.get_best(service)
+        bridge = self._pick_least_loaded(service)
         if bridge is None:
             raise RuntimeError(f"No healthy accounts for service={service}")
         return bridge

@@ -119,6 +119,23 @@ class AccountPool:
         key = f"{account_name}:{service}"
         return self.bridges.get(key)
 
+    def get_least_loaded(self, service: str, chat_counts: Dict[str, int],
+                         exclude_key: str = "") -> Optional[TelethonBridge]:
+        """Здоровый bridge с наименьшим количеством активных чатов."""
+        best = None
+        best_count = float("inf")
+        for key in self._sorted_by_service.get(service, []):
+            if key == exclude_key:
+                continue
+            bridge = self.bridges[key]
+            if not bridge.is_healthy:
+                continue
+            count = chat_counts.get(bridge.account_name, 0)
+            if count < best_count:
+                best_count = count
+                best = bridge
+        return best
+
     # === Информация ===========================================================
 
     def all_statuses(self) -> List[dict]:
