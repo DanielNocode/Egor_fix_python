@@ -68,6 +68,8 @@ FILES = [
     ("config.py", "config.py"),
     ("core/bot_fallback.py", "core/bot_fallback.py"),
     ("core/registry.py", "core/registry.py"),
+    ("core/pool.py", "core/pool.py"),
+    ("core/router.py", "core/router.py"),
     ("services/send_text.py", "services/send_text.py"),
     ("services/send_media.py", "services/send_media.py"),
     ("dashboard/routes.py", "dashboard/routes.py"),
