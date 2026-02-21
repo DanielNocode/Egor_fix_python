@@ -164,8 +164,9 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     def api_sync_dialogs():
         """Подтянуть все группы/супергруппы из кэша Telethon в реестр."""
         from telethon.tl.types import Channel, Chat
+        import datetime as _dt
         added = 0
-        skipped = 0
+        updated = 0
         seen_ids = set()
 
         # Собираем бриджи по приоритету (lowest priority number first)
@@ -187,7 +188,6 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                 else:
                     continue
 
-                # Вычисляем chat_id в формате -100xxx
                 eid = getattr(entity, "id", None)
                 if eid is None:
                     continue
@@ -202,8 +202,16 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                 seen_ids.add(chat_id)
 
                 title = getattr(entity, "title", "") or ""
+
+                # Реальная дата создания группы из Telegram
+                entity_date = getattr(entity, "date", None)
+                created_ts = None
+                if isinstance(entity_date, _dt.datetime):
+                    created_ts = entity_date.timestamp()
+
                 was_added = _registry.assign_if_not_exists(
-                    chat_id, bridge.account_name, title=title,
+                    chat_id, bridge.account_name,
+                    title=title, created_at=created_ts,
                 )
                 if was_added:
                     added += 1
@@ -213,9 +221,13 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                         detail=f"Импортирован из кэша ({title})",
                     )
                 else:
-                    skipped += 1
+                    # Обновляем дату и название для существующих
+                    _registry.update_chat_meta(
+                        chat_id, title=title, created_at=created_ts,
+                    )
+                    updated += 1
 
-        # Бэкфил: для чатов без единой операции записываем "sync"
+        # Бэкфил операций: для чатов без единой операции записываем "sync"
         backfilled = 0
         conn = _registry._get_conn()
         rows = conn.execute(
@@ -232,11 +244,22 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             )
             backfilled += 1
 
+        # Проверяем: если чат есть в реестре, но НИ У КОГО в кэше — помечаем left
+        marked_left = 0
+        all_active = _registry.get_all_assignments(limit=10000)
+        for chat in all_active:
+            if chat["status"] != "active":
+                continue
+            if chat["chat_id"] not in seen_ids:
+                _registry.mark_left(chat["chat_id"])
+                marked_left += 1
+
         return jsonify({
             "status": "ok",
             "added": added,
-            "skipped": skipped,
+            "updated": updated,
             "backfilled": backfilled,
+            "marked_left": marked_left,
             "total_seen": len(seen_ids),
         })
 

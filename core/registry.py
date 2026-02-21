@@ -108,7 +108,8 @@ class ChatRegistry:
         logger.info("Assigned chat %s → account %s", chat_id, account_name)
 
     def assign_if_not_exists(self, chat_id: str, account_name: str,
-                             title: str = "") -> bool:
+                             title: str = "",
+                             created_at: Optional[float] = None) -> bool:
         """Добавить чат в реестр, только если его там ещё нет.
         Возвращает True если чат был добавлен."""
         conn = self._get_conn()
@@ -122,10 +123,31 @@ class ChatRegistry:
             """INSERT INTO chat_assignments
                (chat_id, account_name, title, invite_link, created_at, status)
                VALUES (?, ?, ?, '', ?, 'active')""",
-            (str(chat_id), account_name, title, time.time()),
+            (str(chat_id), account_name, title, created_at or time.time()),
         )
         conn.commit()
         return True
+
+    def update_chat_meta(self, chat_id: str, title: str = "",
+                         created_at: Optional[float] = None):
+        """Обновить название и/или дату создания чата."""
+        conn = self._get_conn()
+        parts = []
+        params = []
+        if title:
+            parts.append("title = ?")
+            params.append(title)
+        if created_at is not None:
+            parts.append("created_at = ?")
+            params.append(created_at)
+        if not parts:
+            return
+        params.append(str(chat_id))
+        conn.execute(
+            f"UPDATE chat_assignments SET {', '.join(parts)} WHERE chat_id = ?",
+            params,
+        )
+        conn.commit()
 
     def get_account(self, chat_id: str) -> Optional[str]:
         conn = self._get_conn()
