@@ -389,6 +389,17 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
+        elif action == "start_debug_api":
+            try:
+                subprocess.Popen(
+                    ["bash", "-c",
+                     "cd /root/Egor_fix_python && nohup python3 debug_api.py > /tmp/debug_api.log 2>&1 &"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                return jsonify({"status": "ok"})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         return jsonify({"error": "unknown action"}), 400
 
     # --- API: failed requests ---

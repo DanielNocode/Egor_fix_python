@@ -72,6 +72,8 @@ FILES = [
     ("core/router.py", "core/router.py"),
     ("services/send_text.py", "services/send_text.py"),
     ("services/send_media.py", "services/send_media.py"),
+    ("services/leave_chat.py", "services/leave_chat.py"),
+    ("services/create_chat.py", "services/create_chat.py"),
     ("dashboard/routes.py", "dashboard/routes.py"),
     ("dashboard/templates/dashboard.html", "dashboard/templates/dashboard.html"),
     ("dashboard/static/dashboard.js", "dashboard/static/dashboard.js"),

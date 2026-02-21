@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 from flask import Blueprint, request, jsonify
 from telethon import functions, types
+from telethon.utils import get_peer_id
 
 from core.bridge import TelethonBridge
 from core.router import AccountRouter
@@ -92,11 +93,13 @@ async def _kick_all_members(bridge: TelethonBridge, channel_peer: Any) -> list:
 
 async def _leave_chat_impl(bridge: TelethonBridge, chat_ref: Any) -> dict:
     entity = await bridge.get_entity(chat_ref)
+    peer_id = get_peer_id(entity)
 
     if isinstance(entity, types.Channel):
         kicked = await _kick_all_members(bridge, entity)
         await bridge.client(functions.channels.LeaveChannelRequest(entity))
-        return {"status": "ok", "left_type": "channel", "id": entity.id, "kicked": kicked}
+        return {"status": "ok", "left_type": "channel", "id": entity.id,
+                "peer_id": peer_id, "kicked": kicked}
 
     if isinstance(entity, types.Chat):
         await bridge.client(
@@ -104,7 +107,8 @@ async def _leave_chat_impl(bridge: TelethonBridge, chat_ref: Any) -> dict:
                 chat_id=entity.id, user_id="me",
             )
         )
-        return {"status": "ok", "left_type": "basic_chat", "id": entity.id}
+        return {"status": "ok", "left_type": "basic_chat", "id": entity.id,
+                "peer_id": peer_id}
 
     return {"status": "error", "error": f"unsupported entity type: {type(entity)}"}
 
@@ -135,8 +139,10 @@ def leave_chat():
         )
         code = 200 if result.get("status") == "ok" else 400
         if result.get("status") == "ok":
-            _router.registry.mark_left(str(chat_ref))
-            _router.handle_success(bridge, str(chat_ref), "leave_chat")
+            # peer_id совпадает с форматом хранения в БД (get_peer_id)
+            mark_id = str(result.get("peer_id") or chat_ref)
+            _router.registry.mark_left(mark_id)
+            _router.handle_success(bridge, mark_id, "leave_chat")
         return jsonify(result), code
 
     except Exception as e:
