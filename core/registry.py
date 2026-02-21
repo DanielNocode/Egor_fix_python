@@ -111,6 +111,14 @@ class ChatRegistry:
         )
         conn.commit()
 
+    def is_left(self, chat_id: str) -> bool:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT status FROM chat_assignments WHERE chat_id = ?",
+            (str(chat_id),),
+        ).fetchone()
+        return row is not None and row["status"] == "left"
+
     def get_all_assignments(self, limit: int = 200) -> List[Dict[str, Any]]:
         conn = self._get_conn()
         rows = conn.execute(
