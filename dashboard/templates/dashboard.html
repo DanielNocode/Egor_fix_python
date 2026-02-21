@@ -115,7 +115,6 @@
     <section class="tabs-section">
         <div class="tab-buttons">
             <button class="tab-btn active" data-tab="chats">Чаты</button>
-            <button class="tab-btn" data-tab="operations">Операции</button>
             <button class="tab-btn" data-tab="failovers">Переключения</button>
             <button class="tab-btn" data-tab="failed">Неудачные запросы</button>
             <button class="tab-btn" data-tab="logs">Системные логи</button>
@@ -141,30 +140,6 @@
                 </table>
             </div>
             <div id="chats-more"></div>
-        </div>
-
-        <!-- TAB: Operations -->
-        <div class="tab-content" id="tab-operations">
-            <div class="search-bar">
-                <input type="text" id="search-ops" placeholder="Поиск по аккаунту, чату, операции..." oninput="filterTable('ops-tbody', this.value)">
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Время</th>
-                            <th>Аккаунт</th>
-                            <th>Чат ID</th>
-                            <th>Название</th>
-                            <th>Операция</th>
-                            <th>Результат</th>
-                            <th>Подробности</th>
-                        </tr>
-                    </thead>
-                    <tbody id="ops-tbody"></tbody>
-                </table>
-            </div>
-            <div id="ops-more"></div>
         </div>
 
         <!-- TAB: Failovers -->
@@ -224,6 +199,34 @@
             <div id="logs-more"></div>
         </div>
     </section>
+
+    <!-- CHAT OPS MODAL -->
+    <div id="chat-ops-modal" class="modal-overlay" style="display:none">
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <h3 id="chat-ops-title">Операции чата</h3>
+                <button onclick="closeChatOpsModal()" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="chat-ops-loading" class="chat-ops-loading">Загрузка...</div>
+                <div class="table-wrap" id="chat-ops-table-wrap" style="display:none">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Время</th>
+                                <th>Аккаунт</th>
+                                <th>Операция</th>
+                                <th>Результат</th>
+                                <th>Подробности</th>
+                            </tr>
+                        </thead>
+                        <tbody id="chat-ops-tbody"></tbody>
+                    </table>
+                </div>
+                <div id="chat-ops-empty" class="chat-ops-empty" style="display:none">Нет операций для этого чата</div>
+            </div>
+        </div>
+    </div>
 
     <!-- EDIT MODAL -->
     <div id="edit-modal" class="modal-overlay" style="display:none">

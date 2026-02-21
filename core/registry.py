@@ -206,6 +206,14 @@ class ChatRegistry:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_operations_by_chat(self, chat_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM operations_log WHERE chat_id = ? ORDER BY ts DESC LIMIT ?",
+            (str(chat_id), limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # === Failover Log =========================================================
 
     def log_failover(self, chat_id: str, from_account: str,

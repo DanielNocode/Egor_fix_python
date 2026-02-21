@@ -832,6 +832,40 @@ td.detail { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
     justify-content: flex-end;
 }
 
+/* ========== CLICKABLE ROWS ========== */
+.clickable-row {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.clickable-row:hover td {
+    background: rgba(96,165,250,0.08) !important;
+}
+.clickable-row:active td {
+    background: rgba(96,165,250,0.12) !important;
+}
+
+/* ========== CHAT OPS MODAL ========== */
+.modal-wide {
+    width: 900px;
+    max-width: 95vw;
+}
+.modal-wide .modal-body {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.chat-ops-loading {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+.chat-ops-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+
 /* ========== SCROLLBAR ========== */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

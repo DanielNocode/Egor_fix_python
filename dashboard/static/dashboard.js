@@ -5,11 +5,9 @@ let _allLogs = [];
 
 const PAGE_SIZE = 20;
 let _allChats = [];
-let _allOps = [];
 let _allFos = [];
 let _allFailed = [];
 let _shownChats = PAGE_SIZE;
-let _shownOps = PAGE_SIZE;
 let _shownFos = PAGE_SIZE;
 let _shownLogs = PAGE_SIZE;
 let _shownFailed = PAGE_SIZE;
@@ -416,7 +414,7 @@ function renderChats() {
     for (const c of showing) {
         const statusText = c.status === 'active' ? 'Активен' : 'Покинут';
         const cls = c.status === 'active' ? 'status-active' : 'status-left';
-        html += `<tr>
+        html += `<tr class="clickable-row" onclick="openChatOps('${esc(c.chat_id)}', '${esc(c.title || c.chat_id)}')">
             <td>${esc(c.chat_id)}</td>
             <td>${esc(c.title)}</td>
             <td>${esc(c.account_name)}</td>
@@ -435,52 +433,61 @@ function showMoreChats(all) {
 }
 function collapseChats() { _shownChats = PAGE_SIZE; renderChats(); }
 
-/* ========== OPERATIONS ========== */
+/* ========== CHAT OPERATIONS MODAL ========== */
 
-function refreshOperations() {
-    fetch('/api/operations?limit=500')
+let _chatOpsOpen = false;
+
+function openChatOps(chatId, chatTitle) {
+    _chatOpsOpen = true;
+    document.getElementById('chat-ops-title').textContent =
+        'Операции: ' + (chatTitle || chatId);
+    document.getElementById('chat-ops-loading').style.display = 'block';
+    document.getElementById('chat-ops-table-wrap').style.display = 'none';
+    document.getElementById('chat-ops-empty').style.display = 'none';
+    document.getElementById('chat-ops-modal').style.display = 'flex';
+
+    fetch('/api/operations_by_chat?chat_id=' + encodeURIComponent(chatId) + '&limit=200')
         .then(r => r.json())
         .then(data => {
-            _allOps = data.operations || [];
-            _shownOps = PAGE_SIZE;
-            renderOps();
+            const ops = data.operations || [];
+            document.getElementById('chat-ops-loading').style.display = 'none';
+
+            if (ops.length === 0) {
+                document.getElementById('chat-ops-empty').style.display = 'block';
+                return;
+            }
+
+            const tbody = document.getElementById('chat-ops-tbody');
+            let html = '';
+            for (const op of ops) {
+                let cls = '';
+                if (op.status === 'ok') cls = 'status-ok';
+                else if (op.status === 'error' || op.status === 'banned') cls = 'status-error';
+                else if (op.status === 'flood_wait') cls = 'status-flood';
+
+                const detail = op.detail ? translateError(op.detail) : null;
+                const detailText = detail ? detail.text : (op.detail || '');
+
+                html += `<tr>
+                    <td>${fmtTime(op.ts)}</td>
+                    <td>${esc(op.account_name)}</td>
+                    <td>${esc(SERVICE_NAMES[op.operation] || op.operation)}</td>
+                    <td class="${cls}">${opStatusRu(op.status)}</td>
+                    <td class="detail" title="${esc(op.detail || '')}">${esc(detailText.substring(0, 80))}</td>
+                </tr>`;
+            }
+            tbody.innerHTML = html;
+            document.getElementById('chat-ops-table-wrap').style.display = 'block';
         })
-        .catch(() => {});
+        .catch(() => {
+            document.getElementById('chat-ops-loading').textContent = 'Ошибка загрузки';
+        });
 }
 
-function renderOps() {
-    const tbody = document.getElementById('ops-tbody');
-    const showing = _allOps.slice(0, _shownOps);
-    let html = '';
-    for (const op of showing) {
-        let cls = '';
-        if (op.status === 'ok') cls = 'status-ok';
-        else if (op.status === 'error' || op.status === 'banned') cls = 'status-error';
-        else if (op.status === 'flood_wait') cls = 'status-flood';
-
-        const detail = op.detail ? translateError(op.detail) : null;
-        const detailText = detail ? detail.text : (op.detail || '');
-
-        html += `<tr>
-            <td>${fmtTime(op.ts)}</td>
-            <td>${esc(op.account_name)}</td>
-            <td>${esc(op.chat_id)}</td>
-            <td>${esc(op.chat_title || '')}</td>
-            <td>${esc(SERVICE_NAMES[op.operation] || op.operation)}</td>
-            <td class="${cls}">${opStatusRu(op.status)}</td>
-            <td class="detail" title="${esc(op.detail || '')}">${esc(detailText.substring(0, 60))}</td>
-        </tr>`;
-    }
-    tbody.innerHTML = html || '<tr><td colspan="7" class="empty-row">Операций пока нет</td></tr>';
-    document.getElementById('ops-more').innerHTML =
-        showMoreBar(_allOps.length, _shownOps, 'showMoreOps', 'collapseOps');
+function closeChatOpsModal() {
+    document.getElementById('chat-ops-modal').style.display = 'none';
+    _chatOpsOpen = false;
 }
-
-function showMoreOps(all) {
-    _shownOps = all ? _allOps.length : _shownOps + PAGE_SIZE;
-    renderOps();
-}
-function collapseOps() { _shownOps = PAGE_SIZE; renderOps(); }
 
 /* ========== FAILOVERS ========== */
 
@@ -827,7 +834,6 @@ function refreshAll() {
     refreshLoad();
     refreshAccounts();
     refreshChats();
-    refreshOperations();
     refreshFailovers();
     // Обновляем failed requests если вкладка уже загружалась
     if (_allFailed.length > 0 || document.querySelector('.tab-btn[data-tab="failed"].active')) {
@@ -849,16 +855,18 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshAll();
     startAutoRefresh();
 
-    // Закрытие модалки по Escape
+    // Закрытие модалок по Escape
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && _editingRequestId !== null) {
-            closeEditModal();
+        if (e.key === 'Escape') {
+            if (_editingRequestId !== null) closeEditModal();
+            if (_chatOpsOpen) closeChatOpsModal();
         }
     });
     // Закрытие по клику на оверлей
     document.getElementById('edit-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'edit-modal') {
-            closeEditModal();
-        }
+        if (e.target.id === 'edit-modal') closeEditModal();
+    });
+    document.getElementById('chat-ops-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'chat-ops-modal') closeChatOpsModal();
     });
 });

@@ -171,6 +171,18 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             op["chat_title"] = titles.get(op.get("chat_id", ""), "")
         return jsonify({"operations": ops})
 
+    # --- API: operations by chat ---
+
+    @app.route("/api/operations_by_chat")
+    @requires_auth
+    def api_operations_by_chat():
+        chat_id = request.args.get("chat_id", "")
+        if not chat_id:
+            return jsonify({"error": "chat_id is required"}), 400
+        limit = int(request.args.get("limit", 100))
+        ops = _registry.get_operations_by_chat(chat_id, limit=limit)
+        return jsonify({"operations": ops})
+
     # --- API: failover log ---
 
     @app.route("/api/failovers")
