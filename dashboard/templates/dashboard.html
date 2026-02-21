@@ -3,16 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Платформа Telethon — Панель управления</title>
+    <title>Telethon Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
     <header>
-        <h1>Панель управления</h1>
+        <div class="header-left">
+            <div class="logo">T</div>
+            <div>
+                <h1>Telethon Platform</h1>
+                <span id="last-update" class="muted"></span>
+            </div>
+        </div>
         <div class="header-right">
-            <span id="last-update" class="muted"></span>
-            <button onclick="refreshAll()" class="btn btn-sm">Обновить</button>
-            <button onclick="restartPlatform()" class="btn btn-sm btn-red">Перезапустить</button>
+            <button onclick="refreshAll()" class="btn btn-ghost">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg>
+                Обновить
+            </button>
+            <button onclick="restartPlatform()" class="btn btn-danger">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64A9 9 0 0020.77 15M2 12a10 10 0 0018 6M2 12a10 10 0 0118-6"/><circle cx="12" cy="12" r="1"/></svg>
+                Перезапустить
+            </button>
         </div>
     </header>
 
@@ -21,7 +38,10 @@
 
     <!-- SERVICES -->
     <section>
-        <h2>Сервисы</h2>
+        <h2>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            Сервисы
+        </h2>
         <div class="services-row" id="services-row"></div>
     </section>
 
@@ -29,26 +49,44 @@
     <section>
         <div class="summary-row" id="summary-row">
             <div class="summary-card">
+                <div class="summary-icon si-blue">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>
+                </div>
                 <div class="summary-value" id="s-healthy">-</div>
                 <div class="summary-label">Аккаунты работают</div>
             </div>
             <div class="summary-card">
+                <div class="summary-icon si-green">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                </div>
                 <div class="summary-value" id="s-chats">-</div>
                 <div class="summary-label">Активных чатов</div>
             </div>
             <div class="summary-card">
+                <div class="summary-icon si-purple">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                </div>
                 <div class="summary-value" id="s-ops">-</div>
                 <div class="summary-label">Всего операций</div>
             </div>
             <div class="summary-card">
+                <div class="summary-icon si-red">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
+                </div>
                 <div class="summary-value" id="s-errors">-</div>
                 <div class="summary-label">Ошибок</div>
             </div>
             <div class="summary-card">
+                <div class="summary-icon si-yellow">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+                </div>
                 <div class="summary-value" id="s-failovers">-</div>
                 <div class="summary-label">Переключений</div>
             </div>
             <div class="summary-card">
+                <div class="summary-icon si-orange">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+                </div>
                 <div class="summary-value" id="s-retries">-</div>
                 <div class="summary-label">Ожидают повтора</div>
             </div>
@@ -57,13 +95,19 @@
 
     <!-- LOAD DISTRIBUTION -->
     <section>
-        <h2>Распределение нагрузки</h2>
+        <h2>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+            Распределение нагрузки
+        </h2>
         <div class="load-section" id="load-section"></div>
     </section>
 
     <!-- ACCOUNTS -->
     <section>
-        <h2>Аккаунты</h2>
+        <h2>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Аккаунты
+        </h2>
         <div class="cards" id="accounts-grid"></div>
     </section>
 
@@ -149,7 +193,7 @@
         <div class="tab-content" id="tab-failed">
             <div class="search-bar">
                 <input type="text" id="search-failed" placeholder="Поиск по сервису, ошибке..." oninput="filterTable('failed-tbody', this.value)">
-                <button onclick="refreshFailed()" class="btn btn-sm">Обновить</button>
+                <button onclick="refreshFailed()" class="btn btn-ghost btn-sm">Обновить</button>
             </div>
             <div class="table-wrap">
                 <table>
@@ -174,7 +218,7 @@
         <div class="tab-content" id="tab-logs">
             <div class="search-bar">
                 <input type="text" id="search-logs" placeholder="Поиск в логах..." oninput="filterLogs(this.value)">
-                <button onclick="refreshLogs()" class="btn btn-sm">Обновить логи</button>
+                <button onclick="refreshLogs()" class="btn btn-ghost btn-sm">Обновить логи</button>
             </div>
             <div class="logs-wrap" id="logs-wrap"></div>
             <div id="logs-more"></div>
@@ -199,9 +243,9 @@
                 <div id="modal-error" class="modal-error" style="display:none"></div>
             </div>
             <div class="modal-footer">
-                <button onclick="savePayload()" class="btn btn-green">Сохранить</button>
-                <button onclick="saveAndRetry()" class="btn btn-blue">Сохранить и повторить</button>
-                <button onclick="closeEditModal()" class="btn">Отмена</button>
+                <button onclick="savePayload()" class="btn btn-success">Сохранить</button>
+                <button onclick="saveAndRetry()" class="btn btn-primary">Сохранить и повторить</button>
+                <button onclick="closeEditModal()" class="btn btn-ghost">Отмена</button>
             </div>
         </div>
     </div>
