@@ -41,6 +41,25 @@ def get_session_path(session_name):
     return f"{session_name}.session"
 
 
+def check_session_auth_sqlite(session_name):
+    """Check if a session has auth_key by reading SQLite directly (no Telegram connection)."""
+    import sqlite3
+    path = get_session_path(session_name)
+    if not os.path.exists(path):
+        return "MISSING", None
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+        cur = conn.cursor()
+        cur.execute("SELECT auth_key FROM sessions LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0] and len(row[0]) > 0:
+            return "OK", f"{len(row[0])}b key"
+        return "NOT_AUTH", None
+    except Exception as e:
+        return "ERROR", str(e)
+
+
 def check_existing_sessions():
     print("\n" + "=" * 70)
     print("SESSION STATUS")
@@ -55,31 +74,27 @@ def check_existing_sessions():
         for svc in SERVICE_TYPES:
             session_name = acc["sessions"].get(svc)
             if session_name:
-                path = get_session_path(session_name)
-                exists = os.path.exists(path)
-                if exists:
-                    size = os.path.getsize(path)
-                    if size > 28672:
-                        status = f"OK ({size}b)"
-                        symbol = "+"
-                    else:
-                        status = f"EMPTY STUB ({size}b)"
-                        symbol = "!"
-                        missing.append((acc, svc, session_name))
-                else:
-                    status = "MISSING"
-                    symbol = "!"
+                status, detail = check_session_auth_sqlite(session_name)
+                if status == "OK":
+                    print(f"    [+] {svc:15s} -> {session_name}.session  [OK @{detail}]")
+                elif status == "MISSING":
+                    print(f"    [!] {svc:15s} -> {session_name}.session  [MISSING]")
                     missing.append((acc, svc, session_name))
-                print(f"    [{symbol}] {svc:15s} -> {session_name}.session  [{status}]")
+                elif status == "NOT_AUTH":
+                    print(f"    [!] {svc:15s} -> {session_name}.session  [NOT AUTHORIZED]")
+                    missing.append((acc, svc, session_name))
+                else:
+                    print(f"    [!] {svc:15s} -> {session_name}.session  [ERROR: {detail}]")
+                    missing.append((acc, svc, session_name))
             else:
                 print(f"    [-] {svc:15s} -> (not in config.py)")
                 missing.append((acc, svc, None))
 
     print("\n" + "-" * 70)
     if not missing:
-        print("All sessions exist! Nothing to create.")
+        print("All sessions authorized!")
     else:
-        print(f"Missing {len(missing)} sessions:")
+        print(f"Need auth: {len(missing)} sessions:")
         for acc, svc, name in missing:
             label = name or "(add to config.py first)"
             print(f"  - {acc['name']} / {svc} -> {label}")
@@ -146,18 +161,20 @@ async def create_session(acc, svc, session_name):
         # Force save session to disk
         client.session.save()
 
-        # Verify file was actually written
-        if os.path.exists(session_path):
-            final_size = os.path.getsize(session_path)
-            if final_size > 28672:
-                print(f"Session SAVED: {session_path} ({final_size}b)")
-            else:
-                print(f"WARNING: Session file is still small ({final_size}b) - auth may not have saved!")
-        else:
-            print(f"WARNING: Session file not found after auth!")
-
     finally:
         await client.disconnect()
+
+    # Verify by reconnecting with a fresh client
+    verify = TelegramClient(session_name, acc["api_id"], acc["api_hash"])
+    try:
+        await verify.connect()
+        if await verify.is_user_authorized():
+            me = await verify.get_me()
+            print(f"VERIFIED: {session_path} -> @{me.username}")
+        else:
+            print(f"FAILED: {session_path} - session NOT authorized after save!")
+    finally:
+        await verify.disconnect()
 
 
 async def main():
@@ -175,7 +192,7 @@ async def main():
     missing = check_existing_sessions()
 
     if not missing:
-        print("\nAll sessions exist. Done.")
+        print("\nAll sessions authorized. Done.")
         return
 
     to_create = [(acc, svc, name) for acc, svc, name in missing if name]

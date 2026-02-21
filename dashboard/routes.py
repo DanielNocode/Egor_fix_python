@@ -10,6 +10,7 @@ dashboard/routes.py — Flask-дашборд для Егора.
   - Управление: reload cache, сброс ошибок
 """
 import asyncio
+import os
 import time
 import logging
 from functools import wraps
@@ -66,10 +67,11 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     _router = router
     _loop = loop
 
+    _dir = os.path.dirname(os.path.abspath(__file__))
     app = Flask(
         "dashboard",
-        template_folder="dashboard/templates",
-        static_folder="dashboard/static",
+        template_folder=os.path.join(_dir, "templates"),
+        static_folder=os.path.join(_dir, "static"),
         static_url_path="/static",
     )
 
