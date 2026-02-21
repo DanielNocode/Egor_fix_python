@@ -558,12 +558,11 @@ function renderFailed() {
             ? ` (${item.retry_count}x, ${item.last_retry_error ? item.last_retry_error.substring(0, 40) : ''})`
             : '';
 
-        let actions = '';
+        let actions = `<button onclick="openEditModal(${item.id})" class="btn btn-sm">Редактировать</button> `;
         if (item.status === 'pending') {
-            actions = `<button onclick="retryRequest(${item.id})" class="btn btn-sm btn-blue">Повторить</button> `;
+            actions += `<button onclick="retryRequest(${item.id})" class="btn btn-sm btn-blue">Повторить</button> `;
         }
         actions += `<button onclick="deleteRequest(${item.id})" class="btn btn-sm btn-red">Удалить</button>`;
-        actions += ` <button onclick="showPayload(${item.id})" class="btn btn-sm">JSON</button>`;
 
         html += `<tr>
             <td>${fmtTime(item.ts)}</td>
@@ -625,15 +624,108 @@ function deleteRequest(id) {
     .catch(e => alert('Ошибка: ' + e));
 }
 
-function showPayload(id) {
+let _editingRequestId = null;
+
+function openEditModal(id) {
     const item = _allFailed.find(f => f.id === id);
     if (!item) return;
+    _editingRequestId = id;
+
+    document.getElementById('modal-service').textContent =
+        SERVICE_NAMES[item.service] || item.service;
+    document.getElementById('modal-direction').textContent =
+        DIRECTION_NAMES[item.direction] || item.direction;
+    document.getElementById('modal-endpoint').textContent =
+        item.endpoint || '';
+    document.getElementById('modal-title').textContent =
+        'Редактирование запроса #' + id;
+
+    const textarea = document.getElementById('modal-payload');
     try {
-        const payload = JSON.parse(item.request_payload);
-        alert(JSON.stringify(payload, null, 2));
+        const parsed = JSON.parse(item.request_payload);
+        textarea.value = JSON.stringify(parsed, null, 2);
     } catch (e) {
-        alert(item.request_payload);
+        textarea.value = item.request_payload;
     }
+
+    document.getElementById('modal-error').style.display = 'none';
+    document.getElementById('edit-modal').style.display = 'flex';
+    textarea.focus();
+}
+
+function closeEditModal() {
+    document.getElementById('edit-modal').style.display = 'none';
+    _editingRequestId = null;
+}
+
+function _getEditedPayload() {
+    const raw = document.getElementById('modal-payload').value.trim();
+    const errEl = document.getElementById('modal-error');
+    try {
+        JSON.parse(raw);
+        errEl.style.display = 'none';
+        return raw;
+    } catch (e) {
+        errEl.textContent = 'Невалидный JSON: ' + e.message;
+        errEl.style.display = 'block';
+        return null;
+    }
+}
+
+function savePayload() {
+    const payload = _getEditedPayload();
+    if (payload === null) return;
+
+    fetch('/api/update_failed_payload', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: _editingRequestId, payload: payload}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            closeEditModal();
+            refreshFailed();
+        } else {
+            const errEl = document.getElementById('modal-error');
+            errEl.textContent = 'Ошибка сохранения: ' + (data.error || 'unknown');
+            errEl.style.display = 'block';
+        }
+    })
+    .catch(e => {
+        const errEl = document.getElementById('modal-error');
+        errEl.textContent = 'Ошибка: ' + e;
+        errEl.style.display = 'block';
+    });
+}
+
+function saveAndRetry() {
+    const payload = _getEditedPayload();
+    if (payload === null) return;
+
+    const errEl = document.getElementById('modal-error');
+    errEl.style.display = 'none';
+
+    fetch('/api/retry_request', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: _editingRequestId, payload: payload}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            closeEditModal();
+            refreshFailed();
+            refreshSummary();
+        } else {
+            errEl.textContent = 'Ошибка повтора: ' + (data.error || 'unknown');
+            errEl.style.display = 'block';
+        }
+    })
+    .catch(e => {
+        errEl.textContent = 'Ошибка: ' + e;
+        errEl.style.display = 'block';
+    });
 }
 
 /* ========== LOGS ========== */
@@ -756,4 +848,17 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     refreshAll();
     startAutoRefresh();
+
+    // Закрытие модалки по Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && _editingRequestId !== null) {
+            closeEditModal();
+        }
+    });
+    // Закрытие по клику на оверлей
+    document.getElementById('edit-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'edit-modal') {
+            closeEditModal();
+        }
+    });
 });

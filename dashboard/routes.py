@@ -276,10 +276,26 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
         if not item:
             return jsonify({"error": "request not found"}), 404
 
-        try:
-            payload = json.loads(item["request_payload"])
-        except Exception:
-            return jsonify({"error": "invalid payload"}), 400
+        # Если передан отредактированный payload — используем его и сохраняем
+        edited_payload = data.get("payload")
+        if edited_payload is not None:
+            try:
+                # Валидируем JSON
+                if isinstance(edited_payload, str):
+                    payload = json.loads(edited_payload)
+                else:
+                    payload = edited_payload
+                # Сохраняем в БД
+                _registry.update_failed_request_payload(
+                    int(req_id), json.dumps(payload, ensure_ascii=False),
+                )
+            except (json.JSONDecodeError, TypeError) as e:
+                return jsonify({"error": f"invalid JSON: {e}"}), 400
+        else:
+            try:
+                payload = json.loads(item["request_payload"])
+            except Exception:
+                return jsonify({"error": "invalid payload"}), 400
 
         service = item["service"]
         direction = item["direction"]
@@ -337,6 +353,32 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                 int(req_id), "pending", last_retry_error=str(e),
             )
             return jsonify({"status": "error", "error": str(e)}), 500
+
+    @app.route("/api/update_failed_payload", methods=["POST"])
+    @requires_auth
+    def api_update_failed_payload():
+        data = request.get_json(force=True) or {}
+        req_id = data.get("id")
+        new_payload = data.get("payload")
+        if not req_id or new_payload is None:
+            return jsonify({"error": "id and payload are required"}), 400
+
+        item = _registry.get_failed_request_by_id(int(req_id))
+        if not item:
+            return jsonify({"error": "request not found"}), 404
+
+        try:
+            # Валидируем JSON
+            if isinstance(new_payload, str):
+                parsed = json.loads(new_payload)
+            else:
+                parsed = new_payload
+            _registry.update_failed_request_payload(
+                int(req_id), json.dumps(parsed, ensure_ascii=False),
+            )
+            return jsonify({"status": "ok"})
+        except (json.JSONDecodeError, TypeError) as e:
+            return jsonify({"error": f"invalid JSON: {e}"}), 400
 
     @app.route("/api/delete_failed", methods=["POST"])
     @requires_auth

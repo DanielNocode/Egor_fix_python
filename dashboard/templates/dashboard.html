@@ -181,6 +181,31 @@
         </div>
     </section>
 
+    <!-- EDIT MODAL -->
+    <div id="edit-modal" class="modal-overlay" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Редактирование запроса</h3>
+                <button onclick="closeEditModal()" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-info">
+                <span id="modal-service" class="modal-badge"></span>
+                <span id="modal-direction" class="modal-badge"></span>
+                <span id="modal-endpoint" class="muted"></span>
+            </div>
+            <div class="modal-body">
+                <label for="modal-payload">JSON payload:</label>
+                <textarea id="modal-payload" spellcheck="false"></textarea>
+                <div id="modal-error" class="modal-error" style="display:none"></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="savePayload()" class="btn btn-green">Сохранить</button>
+                <button onclick="saveAndRetry()" class="btn btn-blue">Сохранить и повторить</button>
+                <button onclick="closeEditModal()" class="btn">Отмена</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/dashboard.js"></script>
 </body>
 </html>

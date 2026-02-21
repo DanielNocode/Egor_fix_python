@@ -305,6 +305,14 @@ class ChatRegistry:
         )
         conn.commit()
 
+    def update_failed_request_payload(self, req_id: int, new_payload: str):
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE failed_requests SET request_payload = ? WHERE id = ?",
+            (new_payload, req_id),
+        )
+        conn.commit()
+
     def delete_failed_request(self, req_id: int):
         conn = self._get_conn()
         conn.execute("DELETE FROM failed_requests WHERE id = ?", (req_id,))
