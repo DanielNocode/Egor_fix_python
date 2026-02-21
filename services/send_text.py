@@ -30,6 +30,7 @@ from telethon.utils import get_peer_id
 from core.bridge import TelethonBridge
 from core.router import AccountRouter
 from core.retry import run_with_retry
+from core import bot_fallback
 
 logger = logging.getLogger("svc.send_text")
 
@@ -56,6 +57,34 @@ def _save_failed(data: dict, error: str):
         )
     except Exception:
         pass
+
+
+def _try_bot_fallback(chat_ref, text: str, parse_mode: str,
+                      disable_preview: bool, reply_to: Optional[int],
+                      tag_text: str = "") -> Optional[Dict[str, Any]]:
+    """Попытка отправить через Bot API (@alex_rumhelp_bot) как последний фоллбэк."""
+    if not bot_fallback.is_configured():
+        return None
+    try:
+        msg_text = tag_text if tag_text else (text or "")
+        msg = bot_fallback.send_text(
+            chat_id=chat_ref,
+            text=msg_text,
+            parse_mode=parse_mode or "HTML",
+            disable_web_page_preview=disable_preview,
+            reply_to_message_id=reply_to,
+        )
+        logger.info("Bot fallback succeeded for chat %s", chat_ref)
+        return {
+            "status": "ok",
+            "chat_id": str(chat_ref),
+            "message_id": msg.get("message_id"),
+            "chat_type": "group",
+            "fallback": "bot_api",
+        }
+    except Exception as bot_err:
+        logger.error("Bot fallback also failed for chat %s: %s", chat_ref, bot_err)
+        return None
 
 
 # === Helpers ==================================================================
@@ -251,6 +280,13 @@ def send_text():
     try:
         bridge = _router.pick_for_chat(chat_ref, service="send_text")
     except RuntimeError as e:
+        # Все аккаунты недоступны — пробуем Bot API
+        bot_result = _try_bot_fallback(
+            chat_ref, text, parse_mode, disable_preview,
+            int(reply_to) if reply_to is not None else None,
+        )
+        if bot_result:
+            return jsonify(bot_result)
         return jsonify({"error": str(e)}), 503
 
     try:
@@ -293,6 +329,10 @@ def send_text():
                 return jsonify(result)
             except Exception:
                 continue
+        # Последний шанс — Bot API fallback
+        bot_result = _try_bot_fallback(chat_ref, text, parse_mode, disable_preview, reply_to)
+        if bot_result:
+            return jsonify(bot_result)
         _save_failed(data, f"FloodWait {e.seconds}s (all accounts)")
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
 
@@ -322,6 +362,10 @@ def send_text():
                     continue
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
         logger.error("send_text failed: %s: %s", type(e).__name__, e)
+        # Bot API fallback
+        bot_result = _try_bot_fallback(chat_ref, text, parse_mode, disable_preview, reply_to)
+        if bot_result:
+            return jsonify(bot_result)
         _save_failed(data, str(e))
         return jsonify({"status": "error", "error": str(e)}), 500
 
@@ -329,6 +373,10 @@ def send_text():
         import traceback
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
         logger.error("send_text failed: %s: %s", type(e).__name__, e)
+        # Bot API fallback
+        bot_result = _try_bot_fallback(chat_ref, text, parse_mode, disable_preview, reply_to)
+        if bot_result:
+            return jsonify(bot_result)
         _save_failed(data, str(e))
         return jsonify({
             "status": "error",
