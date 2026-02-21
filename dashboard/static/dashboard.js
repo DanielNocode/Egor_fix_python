@@ -397,7 +397,7 @@ function showMoreBar(total, shown, showMoreFn, collapseFn) {
 /* ========== CHATS ========== */
 
 function refreshChats() {
-    fetch('/api/chats?limit=500')
+    fetch('/api/chats?limit=2000')
         .then(r => r.json())
         .then(data => {
             _allChats = data.chats || [];
@@ -432,6 +432,39 @@ function showMoreChats(all) {
     renderChats();
 }
 function collapseChats() { _shownChats = PAGE_SIZE; renderChats(); }
+
+/* ========== SYNC DIALOGS ========== */
+
+function syncDialogs() {
+    const btn = document.getElementById('sync-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Синхронизация...';
+
+    fetch('/api/sync_dialogs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Синхронизировать';
+
+        if (data.status === 'ok') {
+            const msg = `Синхронизация завершена: добавлено ${data.added}, уже было ${data.skipped}, всего найдено ${data.total_seen} групп`;
+            alert(msg);
+            refreshChats();
+            refreshLoad();
+            refreshSummary();
+        } else {
+            alert('Ошибка синхронизации: ' + (data.error || 'unknown'));
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> Синхронизировать';
+        alert('Ошибка: ' + e);
+    });
+}
 
 /* ========== CHAT OPERATIONS MODAL ========== */
 

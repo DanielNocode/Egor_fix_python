@@ -412,6 +412,8 @@ section > h2 svg {
 .ac-header .dot.banned   { background: var(--red); box-shadow: 0 0 8px rgba(248,113,113,0.5); }
 .ac-header .dot.offline  { background: var(--text-muted); }
 @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.9)} }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
 
 .ac-header .name { font-weight: 600; font-size: 0.88rem; }
 .ac-header .badge {

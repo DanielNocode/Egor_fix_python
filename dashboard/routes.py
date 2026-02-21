@@ -153,9 +153,69 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     @app.route("/api/chats")
     @requires_auth
     def api_chats():
-        limit = int(request.args.get("limit", 200))
+        limit = min(int(request.args.get("limit", 200)), 5000)
         chats = _registry.get_all_assignments(limit=limit)
         return jsonify({"chats": chats})
+
+    # --- API: sync dialogs from Telethon cache ---
+
+    @app.route("/api/sync_dialogs", methods=["POST"])
+    @requires_auth
+    def api_sync_dialogs():
+        """Подтянуть все группы/супергруппы из кэша Telethon в реестр."""
+        from telethon.tl.types import Channel, Chat
+        added = 0
+        skipped = 0
+        seen_ids = set()
+
+        # Собираем бриджи по приоритету (lowest priority number first)
+        bridges_sorted = sorted(
+            _pool.bridges.values(),
+            key=lambda b: b.priority,
+        )
+
+        for bridge in bridges_sorted:
+            if not bridge.is_healthy:
+                continue
+            for cached_id, entity in list(bridge._dialogs.items()):
+                # Только группы и супергруппы
+                if isinstance(entity, Channel):
+                    if not getattr(entity, "megagroup", False):
+                        continue  # пропускаем каналы (broadcast)
+                elif isinstance(entity, Chat):
+                    pass  # обычная группа
+                else:
+                    continue
+
+                # Вычисляем chat_id в формате -100xxx
+                eid = getattr(entity, "id", None)
+                if eid is None:
+                    continue
+
+                if isinstance(entity, Channel):
+                    chat_id = str(-1000000000000 - eid)
+                else:
+                    chat_id = str(-eid)
+
+                if chat_id in seen_ids:
+                    continue
+                seen_ids.add(chat_id)
+
+                title = getattr(entity, "title", "") or ""
+                was_added = _registry.assign_if_not_exists(
+                    chat_id, bridge.account_name, title=title,
+                )
+                if was_added:
+                    added += 1
+                else:
+                    skipped += 1
+
+        return jsonify({
+            "status": "ok",
+            "added": added,
+            "skipped": skipped,
+            "total_seen": len(seen_ids),
+        })
 
     # --- API: operations log ---
 

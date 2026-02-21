@@ -107,6 +107,26 @@ class ChatRegistry:
         conn.commit()
         logger.info("Assigned chat %s → account %s", chat_id, account_name)
 
+    def assign_if_not_exists(self, chat_id: str, account_name: str,
+                             title: str = "") -> bool:
+        """Добавить чат в реестр, только если его там ещё нет.
+        Возвращает True если чат был добавлен."""
+        conn = self._get_conn()
+        existing = conn.execute(
+            "SELECT chat_id FROM chat_assignments WHERE chat_id = ?",
+            (str(chat_id),),
+        ).fetchone()
+        if existing:
+            return False
+        conn.execute(
+            """INSERT INTO chat_assignments
+               (chat_id, account_name, title, invite_link, created_at, status)
+               VALUES (?, ?, ?, '', ?, 'active')""",
+            (str(chat_id), account_name, title, time.time()),
+        )
+        conn.commit()
+        return True
+
     def get_account(self, chat_id: str) -> Optional[str]:
         conn = self._get_conn()
         row = conn.execute(
