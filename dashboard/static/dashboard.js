@@ -455,10 +455,14 @@ function renderOps() {
         const detail = op.detail ? translateError(op.detail) : null;
         const detailText = detail ? detail.text : (op.detail || '');
 
+        const chatLabel = op.chat_title
+            ? `${esc(op.chat_title)}`
+            : esc(op.chat_id);
+
         html += `<tr>
             <td>${fmtTime(op.ts)}</td>
             <td>${esc(op.account_name)}</td>
-            <td>${esc(op.chat_id)}</td>
+            <td title="${esc(op.chat_id)}">${chatLabel}</td>
             <td>${esc(SERVICE_NAMES[op.operation] || op.operation)}</td>
             <td class="${cls}">${opStatusRu(op.status)}</td>
             <td class="detail" title="${esc(op.detail || '')}">${esc(detailText.substring(0, 60))}</td>

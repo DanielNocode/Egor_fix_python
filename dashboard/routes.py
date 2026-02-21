@@ -161,6 +161,9 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
     def api_operations():
         limit = int(request.args.get("limit", 100))
         ops = _registry.get_recent_operations(limit=limit)
+        titles = _registry.get_chat_titles()
+        for op in ops:
+            op["chat_title"] = titles.get(op.get("chat_id", ""), "")
         return jsonify({"operations": ops})
 
     # --- API: failover log ---

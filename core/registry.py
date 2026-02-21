@@ -143,6 +143,14 @@ class ChatRegistry:
         ).fetchall()
         return {row["account_name"]: row["cnt"] for row in rows}
 
+    def get_chat_titles(self) -> Dict[str, str]:
+        """Маппинг chat_id → title из chat_assignments."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT chat_id, title FROM chat_assignments WHERE title != ''"
+        ).fetchall()
+        return {row["chat_id"]: row["title"] for row in rows}
+
     # === Operations Log =======================================================
 
     def log_operation(self, account_name: str, chat_id: str,
