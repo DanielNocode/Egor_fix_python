@@ -289,6 +289,35 @@ def send_media():
     except tl_errors.PeerIdInvalidError:
         return jsonify({"status": "error", "error": "Invalid peer (user_id/username)"}), 400
 
+    except ValueError as e:
+        # Entity resolution failed — пробуем другой аккаунт
+        chat_str = str(user_id) if user_id else (username or "")
+        if "Cannot resolve" in str(e):
+            logger.warning("send_media: entity %s not found on %s, trying failover", chat_str, bridge.name)
+            fallback = _router.pool.get_next_healthy("send_media", exclude_key=bridge.name)
+            if fallback:
+                try:
+                    entity, msgs = _run(
+                        run_with_retry(
+                            _send_media_impl, fallback.client,
+                            fallback, user_id, username,
+                            files, caption, parse_mode, disable_web_page_preview,
+                        ),
+                        timeout=180,
+                    )
+                    _router.handle_success(fallback, chat_str, "send_media")
+                    return jsonify({
+                        "status": "ok",
+                        "recipient": username if username else user_id,
+                        "message_ids": [m.id for m in msgs],
+                        "count": len(msgs),
+                    })
+                except Exception:
+                    pass
+        _router.handle_error(bridge, e, chat_str, "send_media")
+        logger.error("send_media failed: %s: %s", type(e).__name__, e)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
     except Exception as e:
         import traceback
         chat_str = str(user_id) if user_id else (username or "")

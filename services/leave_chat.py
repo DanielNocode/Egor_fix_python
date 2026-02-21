@@ -139,6 +139,15 @@ def leave_chat():
         return jsonify(result), code
 
     except Exception as e:
+        # Если чат не найден — фактически мы уже вышли, помечаем как left
+        if isinstance(e, ValueError) and "Cannot resolve" in str(e):
+            _router.registry.mark_left(str(chat_ref))
+            logger.info("leave_chat: chat %s not found, marking as left", chat_ref)
+            return jsonify({
+                "status": "ok",
+                "left_type": "unresolvable",
+                "note": "Chat not found, marked as left",
+            })
         _router.handle_error(bridge, e, str(chat_ref), "leave_chat")
         return jsonify({"status": "error", "error": str(e)}), 500
 

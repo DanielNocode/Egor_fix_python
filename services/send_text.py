@@ -285,6 +285,34 @@ def send_text():
                 pass
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
 
+    except ValueError as e:
+        # Entity resolution failed — пробуем другой аккаунт
+        if "Cannot resolve" in str(e):
+            logger.warning("send_text: entity %s not found on %s, trying failover", chat_ref, bridge.name)
+            fallback = _router.pool.get_next_healthy("send_text", exclude_key=bridge.name)
+            if fallback:
+                try:
+                    result = _run(
+                        run_with_retry(
+                            _send_text_impl, fallback.client,
+                            fallback, chat_ref, text, tag_client,
+                            int(client_id) if client_id is not None else None,
+                            client_username if isinstance(client_username, str) else None,
+                            exclude_usernames if isinstance(exclude_usernames, list) else [],
+                            disable_preview,
+                            int(reply_to) if reply_to is not None else None,
+                            parse_mode,
+                        ),
+                        timeout=120,
+                    )
+                    _router.handle_success(fallback, str(chat_ref), "send_text")
+                    return jsonify(result)
+                except Exception:
+                    pass
+        _router.handle_error(bridge, e, str(chat_ref), "send_text")
+        logger.error("send_text failed: %s: %s", type(e).__name__, e)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
     except Exception as e:
         import traceback
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
