@@ -46,6 +46,16 @@ def _run(coro, timeout=180):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout=timeout)
 
 
+def _save_failed(data: dict, error: str):
+    try:
+        _router.registry.save_failed_request(
+            service="send_media", endpoint="/send_media",
+            request_payload=data, error=error,
+        )
+    except Exception:
+        pass
+
+
 # === Helpers (из оригинального send_media) ====================================
 
 def _is_url(s: str) -> bool:
@@ -278,15 +288,19 @@ def send_media():
                 })
             except Exception:
                 continue
+        _save_failed(data, f"FloodWait {e.seconds}s (all accounts)")
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
 
     except tl_errors.FileReferenceExpiredError:
+        _save_failed(data, "File reference expired")
         return jsonify({"status": "error", "error": "File reference expired. Re-fetch the post or use a fresh link."}), 410
 
     except tl_errors.UsernameNotOccupiedError:
+        _save_failed(data, "Channel/username not found")
         return jsonify({"status": "error", "error": "Channel/username not found"}), 404
 
     except tl_errors.PeerIdInvalidError:
+        _save_failed(data, "Invalid peer")
         return jsonify({"status": "error", "error": "Invalid peer (user_id/username)"}), 400
 
     except ValueError as e:
@@ -316,6 +330,7 @@ def send_media():
                     continue
         _router.handle_error(bridge, e, chat_str, "send_media")
         logger.error("send_media failed: %s: %s", type(e).__name__, e)
+        _save_failed(data, str(e))
         return jsonify({"status": "error", "error": str(e)}), 500
 
     except Exception as e:
@@ -323,6 +338,7 @@ def send_media():
         chat_str = str(user_id) if user_id else (username or "")
         _router.handle_error(bridge, e, chat_str, "send_media")
         logger.error("send_media failed: %s: %s", type(e).__name__, e)
+        _save_failed(data, str(e))
         return jsonify({
             "status": "error",
             "error": str(e),

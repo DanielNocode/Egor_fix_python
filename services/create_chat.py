@@ -235,6 +235,14 @@ def _send_salebot_callback(client_tg_id: str, invite_link: str):
             logger.info("salebot callback sent: status=%s body=%s", resp.status_code, resp.text[:200])
         except Exception as e:
             logger.error("salebot callback failed: %s", e)
+            try:
+                _router.registry.save_failed_request(
+                    service="salebot_callback", endpoint=config.SALEBOT_CALLBACK_URL,
+                    request_payload=payload, error=str(e),
+                    direction="outbound",
+                )
+            except Exception:
+                pass
 
     threading.Thread(target=_do_send, daemon=True).start()
 
@@ -321,4 +329,12 @@ def create_chat():
                 _router.handle_error(fallback, e2, "", "create_chat")
                 continue
 
+        # Все аккаунты отказали — сохраняем для повтора
+        try:
+            _router.registry.save_failed_request(
+                service="create_chat", endpoint="/create_chat",
+                request_payload=data, error=str(e),
+            )
+        except Exception:
+            pass
         return jsonify({"error": str(e)}), 500

@@ -7,10 +7,12 @@ const PAGE_SIZE = 20;
 let _allChats = [];
 let _allOps = [];
 let _allFos = [];
+let _allFailed = [];
 let _shownChats = PAGE_SIZE;
 let _shownOps = PAGE_SIZE;
 let _shownFos = PAGE_SIZE;
 let _shownLogs = PAGE_SIZE;
+let _shownFailed = PAGE_SIZE;
 
 /* ========== ПЕРЕВОД ОШИБОК ========== */
 
@@ -234,6 +236,10 @@ function refreshSummary() {
             document.getElementById('s-ops').textContent = data.total_operations;
             document.getElementById('s-errors').textContent = data.total_errors;
             document.getElementById('s-failovers').textContent = data.total_failovers;
+
+            const retriesEl = document.getElementById('s-retries');
+            retriesEl.textContent = data.pending_retries || 0;
+            retriesEl.className = 'summary-value' + ((data.pending_retries || 0) > 0 ? ' val-red' : '');
 
             const errEl = document.getElementById('s-errors');
             errEl.className = 'summary-value' + (data.total_errors > 0 ? ' val-red' : '');
@@ -515,6 +521,121 @@ function showMoreFos(all) {
 }
 function collapseFos() { _shownFos = PAGE_SIZE; renderFos(); }
 
+/* ========== FAILED REQUESTS ========== */
+
+const DIRECTION_NAMES = {
+    inbound: 'Входящий',
+    outbound: 'Исходящий',
+};
+
+const FAILED_STATUS_NAMES = {
+    pending: 'Ожидает',
+    retried: 'Повторён',
+    resolved: 'Решён',
+};
+
+function refreshFailed() {
+    fetch('/api/failed_requests?limit=500')
+        .then(r => r.json())
+        .then(data => {
+            _allFailed = data.failed_requests || [];
+            _shownFailed = PAGE_SIZE;
+            renderFailed();
+        })
+        .catch(() => {});
+}
+
+function renderFailed() {
+    const tbody = document.getElementById('failed-tbody');
+    const showing = _allFailed.slice(0, _shownFailed);
+    let html = '';
+    for (const item of showing) {
+        const err = translateError(item.error);
+        const errText = err ? err.text : (item.error || '');
+        const statusCls = item.status === 'pending' ? 'status-error'
+            : item.status === 'retried' ? 'status-ok' : '';
+        const retryInfo = item.retry_count > 0
+            ? ` (${item.retry_count}x, ${item.last_retry_error ? item.last_retry_error.substring(0, 40) : ''})`
+            : '';
+
+        let actions = '';
+        if (item.status === 'pending') {
+            actions = `<button onclick="retryRequest(${item.id})" class="btn btn-sm btn-blue">Повторить</button> `;
+        }
+        actions += `<button onclick="deleteRequest(${item.id})" class="btn btn-sm btn-red">Удалить</button>`;
+        actions += ` <button onclick="showPayload(${item.id})" class="btn btn-sm">JSON</button>`;
+
+        html += `<tr>
+            <td>${fmtTime(item.ts)}</td>
+            <td>${esc(SERVICE_NAMES[item.service] || item.service)}</td>
+            <td>${esc(DIRECTION_NAMES[item.direction] || item.direction)}</td>
+            <td class="detail" title="${esc(item.error || '')}">${esc(errText.substring(0, 50))}</td>
+            <td>${item.retry_count}${esc(retryInfo)}</td>
+            <td class="${statusCls}">${esc(FAILED_STATUS_NAMES[item.status] || item.status)}</td>
+            <td class="actions-cell">${actions}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html || '<tr><td colspan="7" class="empty-row">Неудачных запросов нет</td></tr>';
+    document.getElementById('failed-more').innerHTML =
+        showMoreBar(_allFailed.length, _shownFailed, 'showMoreFailed', 'collapseFailed');
+}
+
+function showMoreFailed(all) {
+    _shownFailed = all ? _allFailed.length : _shownFailed + PAGE_SIZE;
+    renderFailed();
+}
+function collapseFailed() { _shownFailed = PAGE_SIZE; renderFailed(); }
+
+function retryRequest(id) {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Повтор...';
+    fetch('/api/retry_request', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: id}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            btn.textContent = 'Готово';
+            btn.className = 'btn btn-sm btn-green';
+            setTimeout(refreshFailed, 1000);
+        } else {
+            alert('Ошибка повтора: ' + (data.error || 'unknown'));
+            btn.disabled = false;
+            btn.textContent = 'Повторить';
+        }
+    })
+    .catch(e => {
+        alert('Ошибка: ' + e);
+        btn.disabled = false;
+        btn.textContent = 'Повторить';
+    });
+}
+
+function deleteRequest(id) {
+    if (!confirm('Удалить этот запрос?')) return;
+    fetch('/api/delete_failed', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: id}),
+    })
+    .then(() => refreshFailed())
+    .catch(e => alert('Ошибка: ' + e));
+}
+
+function showPayload(id) {
+    const item = _allFailed.find(f => f.id === id);
+    if (!item) return;
+    try {
+        const payload = JSON.parse(item.request_payload);
+        alert(JSON.stringify(payload, null, 2));
+    } catch (e) {
+        alert(item.request_payload);
+    }
+}
+
 /* ========== LOGS ========== */
 
 function refreshLogs() {
@@ -595,9 +716,12 @@ function initTabs() {
             btn.classList.add('active');
             document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
             document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-            // load logs on first tab click
+            // load data on first tab click
             if (btn.dataset.tab === 'logs' && _allLogs.length === 0) {
                 refreshLogs();
+            }
+            if (btn.dataset.tab === 'failed' && _allFailed.length === 0) {
+                refreshFailed();
             }
         });
     });
@@ -613,6 +737,10 @@ function refreshAll() {
     refreshChats();
     refreshOperations();
     refreshFailovers();
+    // Обновляем failed requests если вкладка уже загружалась
+    if (_allFailed.length > 0 || document.querySelector('.tab-btn[data-tab="failed"].active')) {
+        refreshFailed();
+    }
     document.getElementById('last-update').textContent =
         'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
 }

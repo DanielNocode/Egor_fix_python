@@ -150,6 +150,13 @@ def leave_chat():
                 "note": "Chat not found, marked as left",
             })
         _router.handle_error(bridge, e, str(chat_ref), "leave_chat")
+        try:
+            _router.registry.save_failed_request(
+                service="leave_chat", endpoint="/leave_chat",
+                request_payload=data, error=str(e),
+            )
+        except Exception:
+            pass
         return jsonify({"status": "error", "error": str(e)}), 500
 
 

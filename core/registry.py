@@ -6,7 +6,9 @@ core/registry.py — ChatRegistry: SQLite-реестр привязки чато
   chat_assignments  — chat_id → account_name
   operations_log    — лог всех операций
   failover_log      — лог переключений аккаунтов
+  failed_requests   — неудачные запросы для повторного выполнения
 """
+import json
 import sqlite3
 import time
 import threading
@@ -67,11 +69,27 @@ class ChatRegistry:
                 reason        TEXT DEFAULT ''
             );
 
+            CREATE TABLE IF NOT EXISTS failed_requests (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts              REAL NOT NULL,
+                service         TEXT NOT NULL,
+                direction       TEXT NOT NULL DEFAULT 'inbound',
+                endpoint        TEXT DEFAULT '',
+                request_payload TEXT NOT NULL DEFAULT '{}',
+                error           TEXT DEFAULT '',
+                status          TEXT DEFAULT 'pending',
+                retry_count     INTEGER DEFAULT 0,
+                last_retry_ts   REAL DEFAULT 0,
+                last_retry_error TEXT DEFAULT ''
+            );
+
             CREATE INDEX IF NOT EXISTS idx_ops_ts ON operations_log(ts);
             CREATE INDEX IF NOT EXISTS idx_ops_chat ON operations_log(chat_id);
             CREATE INDEX IF NOT EXISTS idx_fo_ts ON failover_log(ts);
             CREATE INDEX IF NOT EXISTS idx_assign_account ON chat_assignments(account_name);
             CREATE INDEX IF NOT EXISTS idx_ops_account ON operations_log(account_name);
+            CREATE INDEX IF NOT EXISTS idx_failed_ts ON failed_requests(ts);
+            CREATE INDEX IF NOT EXISTS idx_failed_status ON failed_requests(status);
         """)
         conn.commit()
 
@@ -245,6 +263,60 @@ class ChatRegistry:
             "total_failovers": failovers,
         }
 
+    # === Failed Requests =====================================================
+
+    def save_failed_request(self, service: str, endpoint: str,
+                            request_payload: dict, error: str,
+                            direction: str = "inbound"):
+        conn = self._get_conn()
+        conn.execute(
+            """INSERT INTO failed_requests
+               (ts, service, direction, endpoint, request_payload, error, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
+            (time.time(), service, direction, endpoint,
+             json.dumps(request_payload, ensure_ascii=False), error),
+        )
+        conn.commit()
+
+    def get_failed_requests(self, limit: int = 200) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM failed_requests ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_failed_request_by_id(self, req_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM failed_requests WHERE id = ?", (req_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_failed_request(self, req_id: int, status: str,
+                              last_retry_error: str = ""):
+        conn = self._get_conn()
+        conn.execute(
+            """UPDATE failed_requests
+               SET status = ?, retry_count = retry_count + 1,
+                   last_retry_ts = ?, last_retry_error = ?
+               WHERE id = ?""",
+            (status, time.time(), last_retry_error, req_id),
+        )
+        conn.commit()
+
+    def delete_failed_request(self, req_id: int):
+        conn = self._get_conn()
+        conn.execute("DELETE FROM failed_requests WHERE id = ?", (req_id,))
+        conn.commit()
+
+    def get_failed_requests_count(self) -> int:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT COUNT(*) as c FROM failed_requests WHERE status = 'pending'"
+        ).fetchone()
+        return row["c"]
+
     # === Cleanup ==============================================================
 
     def cleanup_old_logs(self, days: int = 30):
@@ -252,4 +324,8 @@ class ChatRegistry:
         conn = self._get_conn()
         conn.execute("DELETE FROM operations_log WHERE ts < ?", (cutoff,))
         conn.execute("DELETE FROM failover_log WHERE ts < ?", (cutoff,))
+        conn.execute(
+            "DELETE FROM failed_requests WHERE status != 'pending' AND ts < ?",
+            (cutoff,),
+        )
         conn.commit()

@@ -48,6 +48,16 @@ def _run(coro, timeout=120):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout=timeout)
 
 
+def _save_failed(data: dict, error: str):
+    try:
+        _router.registry.save_failed_request(
+            service="send_text", endpoint="/send_text",
+            request_payload=data, error=error,
+        )
+    except Exception:
+        pass
+
+
 # === Helpers ==================================================================
 
 def _display_name(u: types.User) -> str:
@@ -283,6 +293,7 @@ def send_text():
                 return jsonify(result)
             except Exception:
                 continue
+        _save_failed(data, f"FloodWait {e.seconds}s (all accounts)")
         return jsonify({"status": "error", "error": "FloodWait", "retry_after": e.seconds}), 429
 
     except ValueError as e:
@@ -311,12 +322,14 @@ def send_text():
                     continue
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
         logger.error("send_text failed: %s: %s", type(e).__name__, e)
+        _save_failed(data, str(e))
         return jsonify({"status": "error", "error": str(e)}), 500
 
     except Exception as e:
         import traceback
         _router.handle_error(bridge, e, str(chat_ref), "send_text")
         logger.error("send_text failed: %s: %s", type(e).__name__, e)
+        _save_failed(data, str(e))
         return jsonify({
             "status": "error",
             "error": str(e),

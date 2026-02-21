@@ -11,6 +11,7 @@ dashboard/routes.py — Flask-дашборд для Егора.
   - Управление: перезагрузка кэша, сброс ошибок, перезапуск платформы
 """
 import asyncio
+import json
 import os
 import subprocess
 import time
@@ -18,6 +19,7 @@ import logging
 from functools import wraps
 from typing import Optional
 
+import requests as http_requests
 from flask import Flask, render_template, jsonify, request, Response
 
 import config
@@ -129,6 +131,7 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             "total_operations": db_stats["total_operations"],
             "total_errors": db_stats["total_errors"],
             "total_failovers": db_stats["total_failovers"],
+            "pending_retries": _registry.get_failed_requests_count(),
         })
 
     # --- API: load distribution ---
@@ -251,6 +254,99 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                 return jsonify({"error": str(e)}), 500
 
         return jsonify({"error": "unknown action"}), 400
+
+    # --- API: failed requests ---
+
+    @app.route("/api/failed_requests")
+    @requires_auth
+    def api_failed_requests():
+        limit = int(request.args.get("limit", 200))
+        items = _registry.get_failed_requests(limit=limit)
+        return jsonify({"failed_requests": items})
+
+    @app.route("/api/retry_request", methods=["POST"])
+    @requires_auth
+    def api_retry_request():
+        data = request.get_json(force=True) or {}
+        req_id = data.get("id")
+        if not req_id:
+            return jsonify({"error": "id is required"}), 400
+
+        item = _registry.get_failed_request_by_id(int(req_id))
+        if not item:
+            return jsonify({"error": "request not found"}), 404
+
+        try:
+            payload = json.loads(item["request_payload"])
+        except Exception:
+            return jsonify({"error": "invalid payload"}), 400
+
+        service = item["service"]
+        direction = item["direction"]
+
+        # Исходящий запрос (salebot) — просто переотправляем
+        if direction == "outbound":
+            try:
+                resp = http_requests.post(
+                    item["endpoint"], json=payload, timeout=15,
+                )
+                if resp.status_code < 400:
+                    _registry.update_failed_request(int(req_id), "retried")
+                    return jsonify({"status": "ok", "response_code": resp.status_code})
+                else:
+                    _registry.update_failed_request(
+                        int(req_id), "pending",
+                        last_retry_error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    )
+                    return jsonify({"status": "error", "error": f"HTTP {resp.status_code}"}), 502
+            except Exception as e:
+                _registry.update_failed_request(
+                    int(req_id), "pending", last_retry_error=str(e),
+                )
+                return jsonify({"status": "error", "error": str(e)}), 500
+
+        # Входящий запрос — перенаправляем на внутренний сервис
+        port_map = {
+            "create_chat": config.PORTS["create_chat"],
+            "send_text": config.PORTS["send_text"],
+            "send_media": config.PORTS["send_media"],
+            "leave_chat": config.PORTS["leave_chat"],
+        }
+        port = port_map.get(service)
+        if not port:
+            return jsonify({"error": f"unknown service: {service}"}), 400
+
+        endpoint = item["endpoint"] or f"/{service}"
+        url = f"http://localhost:{port}{endpoint}"
+
+        try:
+            resp = http_requests.post(url, json=payload, timeout=120)
+            resp_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+
+            if resp.status_code < 400 and resp_data.get("status") != "error":
+                _registry.update_failed_request(int(req_id), "retried")
+                return jsonify({"status": "ok", "service_response": resp_data})
+            else:
+                error_msg = resp_data.get("error", f"HTTP {resp.status_code}")
+                _registry.update_failed_request(
+                    int(req_id), "pending", last_retry_error=error_msg,
+                )
+                return jsonify({"status": "error", "error": error_msg}), resp.status_code
+        except Exception as e:
+            _registry.update_failed_request(
+                int(req_id), "pending", last_retry_error=str(e),
+            )
+            return jsonify({"status": "error", "error": str(e)}), 500
+
+    @app.route("/api/delete_failed", methods=["POST"])
+    @requires_auth
+    def api_delete_failed():
+        data = request.get_json(force=True) or {}
+        req_id = data.get("id")
+        if not req_id:
+            return jsonify({"error": "id is required"}), 400
+        _registry.delete_failed_request(int(req_id))
+        return jsonify({"status": "ok"})
 
     # --- API: health ---
 

@@ -388,6 +388,14 @@ section > h2 { font-size: 1.1rem; margin-bottom: 12px; font-weight: 600; }
     background: var(--blue) !important;
     color: #fff !important;
 }
+.actions-cell {
+    white-space: nowrap;
+}
+.actions-cell .btn {
+    margin: 1px 2px;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+}
 
 /* ========== TABLES ========== */
 .table-wrap {
