@@ -15,6 +15,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
+import requests as http_requests
 from flask import Blueprint, request, jsonify
 from telethon import functions, types
 from telethon.utils import get_peer_id
@@ -22,6 +23,7 @@ from telethon.utils import get_peer_id
 from core.bridge import TelethonBridge
 from core.router import AccountRouter
 from core.retry import run_with_retry
+import config
 
 logger = logging.getLogger("svc.create_chat")
 
@@ -211,6 +213,28 @@ async def _create_chat_impl(bridge: TelethonBridge, title: str,
     }
 
 
+# === Salebot callback =========================================================
+
+def _send_salebot_callback(client_tg_id: str, invite_link: str):
+    """Отправляет callback в salebot с invite_link после создания чата."""
+    payload = {
+        "message": "send_invite_link",
+        "user_id": client_tg_id,
+        "group_id": config.SALEBOT_GROUP_ID,
+        "tg_business": 1,
+        "invite_link": invite_link,
+    }
+    try:
+        resp = http_requests.post(
+            config.SALEBOT_CALLBACK_URL,
+            json=payload,
+            timeout=15,
+        )
+        logger.info("salebot callback sent: status=%s body=%s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.error("salebot callback failed: %s", e)
+
+
 # === HTTP endpoint ============================================================
 
 @bp.route("/create_chat", methods=["POST"])
@@ -221,6 +245,7 @@ def create_chat():
     data = request.get_json(force=True, silent=True) or {}
     title: str = (data.get("title") or "").strip()
     usernames: List[str] = data.get("usernames") or []
+    client_tg_id: str = str(data.get("client_tg_id") or "").strip()
 
     if not title:
         return jsonify({"error": "title is required"}), 400
@@ -250,6 +275,12 @@ def create_chat():
                 invite_link=result.get("invite_link") or "",
             )
         _router.handle_success(bridge, chat_id, "create_chat")
+
+        # Отправляем callback в salebot
+        invite_link = result.get("invite_link") or ""
+        if client_tg_id and invite_link:
+            _send_salebot_callback(client_tg_id, invite_link)
+
         return jsonify(result)
 
     except Exception as e:
@@ -276,6 +307,12 @@ def create_chat():
                             invite_link=result.get("invite_link") or "",
                         )
                     _router.handle_success(fallback, chat_id, "create_chat")
+
+                    # Отправляем callback в salebot (failover)
+                    invite_link = result.get("invite_link") or ""
+                    if client_tg_id and invite_link:
+                        _send_salebot_callback(client_tg_id, invite_link)
+
                     return jsonify(result)
             except Exception as e2:
                 _router.handle_error(fallback, e2, "", "create_chat")
