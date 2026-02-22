@@ -201,6 +201,20 @@ async def _create_chat_impl(bridge: TelethonBridge, title: str,
     except Exception as e:
         debug["promote_bots_error"] = str(e)
 
+    # 5.2) Invite AMO observer (if chat created by non-main account)
+    if config.AMO_OBSERVER_USERNAME and bridge.account_name != "main":
+        try:
+            amo_user = await bridge.get_entity(config.AMO_OBSERVER_USERNAME)
+            amo_input = types.InputUser(amo_user.id, amo_user.access_hash)
+            await bridge.client(functions.channels.InviteToChannelRequest(
+                channel=channel_peer, users=[amo_input],
+            ))
+            debug["amo_invite"] = "ok"
+        except Exception as e:
+            debug["amo_invite"] = f"error:{e}"
+            logger.warning("Failed to invite AMO observer %s: %s",
+                           config.AMO_OBSERVER_USERNAME, e)
+
     # 6) Invite link
     invite_link = await _export_invite(bridge, channel_peer) or None
     debug["export_invite"] = "ok" if invite_link else "none"

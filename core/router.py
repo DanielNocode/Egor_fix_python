@@ -3,7 +3,7 @@
 core/router.py — AccountRouter: выбор аккаунта + failover + балансировка.
 
 Логика:
-  1. create_chat  → least-loaded: аккаунт с наименьшим числом активных чатов
+  1. create_chat  → weighted-balanced: вероятность обратна загрузке
   2. send_text / send_media / leave_chat → привязанный аккаунт (из registry),
      если нездоров → failover на least-loaded
      если привязки нет → least-loaded
@@ -34,15 +34,21 @@ class AccountRouter:
         counts = self.registry.get_account_chat_counts()
         return self.pool.get_least_loaded(service, counts, exclude_key)
 
+    def _pick_weighted(self, service: str,
+                       exclude_key: str = "") -> Optional[TelethonBridge]:
+        """Взвешенный выбор: менее загруженные получают больше, но не 100%."""
+        counts = self.registry.get_account_chat_counts()
+        return self.pool.get_weighted_balanced(service, counts, exclude_key)
+
     # === Для create_chat ======================================================
 
     def pick_for_create(self, service: str = "create_chat") -> TelethonBridge:
-        """Выбрать bridge с наименьшей нагрузкой для создания чата."""
-        bridge = self._pick_least_loaded(service)
+        """Выбрать bridge взвешенным методом для создания чата."""
+        bridge = self._pick_weighted(service)
         if bridge is None:
             raise RuntimeError(f"No healthy accounts for service={service}")
         logger.info(
-            "Balanced pick for %s → %s (account=%s)",
+            "Weighted pick for %s → %s (account=%s)",
             service, bridge.name, bridge.account_name,
         )
         return bridge

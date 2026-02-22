@@ -102,6 +102,11 @@ FLOOD_WAIT_AUTO_SWITCH = 60     # если FloodWait > N сек, переклю�
 DASHBOARD_USER = os.environ.get("MONITOR_USER", "admin")
 DASHBOARD_PASS = os.environ.get("MONITOR_PASS", "telethon2026")
 
+# === AMO CRM Observer ========================================================
+# Этот аккаунт добавляется во ВСЕ чаты (даже созданные бэкапами),
+# чтобы AmoCRM видела переписки.
+AMO_OBSERVER_USERNAME = "@rumyancev_alex"
+
 # === Salebot Callback ========================================================
 SALEBOT_CALLBACK_URL = os.environ.get(
     "SALEBOT_CALLBACK_URL",

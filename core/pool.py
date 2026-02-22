@@ -7,6 +7,7 @@ core/pool.py — AccountPool: управление пулом Telegram-акка�
 """
 import asyncio
 import logging
+import random
 from typing import Dict, List, Optional
 
 import config
@@ -143,6 +144,37 @@ class AccountPool:
                 best_count = count
                 best = bridge
         return best
+
+    # Фиксированные веса для создания чатов (%)
+    CREATE_WEIGHTS = {
+        "main": 5,
+        "backup_1": 15,
+        "backup_2": 35,
+        "backup_3": 45,
+    }
+
+    def get_weighted_balanced(self, service: str, chat_counts: Dict[str, int],
+                              exclude_key: str = "") -> Optional[TelethonBridge]:
+        """Фиксированное распределение: main=5%, b1=15%, b2=35%, b3=45%.
+        Если аккаунт нездоров — его доля делится между остальными."""
+        candidates = []
+        weights = []
+        for key in self._sorted_by_service.get(service, []):
+            if key == exclude_key:
+                continue
+            bridge = self.bridges[key]
+            if not bridge.is_healthy:
+                continue
+            w = self.CREATE_WEIGHTS.get(bridge.account_name, 10)
+            candidates.append(bridge)
+            weights.append(w)
+
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        return random.choices(candidates, weights=weights, k=1)[0]
 
     # === Информация ===========================================================
 

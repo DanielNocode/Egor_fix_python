@@ -263,6 +263,24 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             "total_seen": len(seen_ids),
         })
 
+    # --- API: simulate weighted distribution ---
+
+    @app.route("/api/simulate_balance")
+    @requires_auth
+    def api_simulate_balance():
+        """Прогон N раундов выбора аккаунта для create_chat (без реального создания)."""
+        n = int(request.args.get("n", 1000))
+        from collections import Counter
+        counter = Counter()
+        for _ in range(n):
+            bridge = _router._pick_weighted("create_chat")
+            if bridge:
+                counter[bridge.account_name] += 1
+        total = sum(counter.values())
+        result = {name: {"count": cnt, "pct": round(cnt / total * 100, 1)}
+                  for name, cnt in sorted(counter.items())}
+        return jsonify({"n": total, "distribution": result})
+
     # --- API: operations log ---
 
     @app.route("/api/operations")
@@ -365,6 +383,17 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             try:
                 subprocess.Popen(
                     ["systemctl", "restart", "telethon-platform"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                return jsonify({"status": "ok"})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        elif action == "start_debug_api":
+            try:
+                subprocess.Popen(
+                    ["bash", "-c",
+                     "cd /root/Egor_fix_python && nohup python3 debug_api.py > /tmp/debug_api.log 2>&1 &"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 return jsonify({"status": "ok"})
