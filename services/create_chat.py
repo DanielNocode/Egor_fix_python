@@ -209,10 +209,16 @@ async def _create_chat_impl(bridge: TelethonBridge, title: str,
             invite_result = await bridge.client(functions.channels.InviteToChannelRequest(
                 channel=channel_peer, users=[amo_input],
             ))
-            debug["amo_invite"] = "ok"
-            logger.info("AMO observer %s invited OK into chat %s (bridge=%s, result_type=%s)",
-                        config.AMO_OBSERVER_USERNAME, watched_id, bridge.name,
-                        type(invite_result).__name__)
+            # Check missing_invitees — users blocked by privacy settings
+            missing = getattr(invite_result, 'missing_invitees', [])
+            if missing:
+                debug["amo_invite"] = f"missing:{[getattr(m,'user_id','?') for m in missing]}"
+                logger.warning("AMO observer %s MISSING (privacy?) in chat %s: %s",
+                               config.AMO_OBSERVER_USERNAME, watched_id, missing)
+            else:
+                debug["amo_invite"] = "ok"
+                logger.info("AMO observer %s invited OK into chat %s (bridge=%s)",
+                            config.AMO_OBSERVER_USERNAME, watched_id, bridge.name)
         except Exception as e:
             debug["amo_invite"] = f"error:{e}"
             logger.warning("Failed to invite AMO observer %s into chat %s: %s",
