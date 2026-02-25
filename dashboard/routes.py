@@ -440,6 +440,21 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
+        elif action == "clear_error_logs":
+            account = data.get("account", "")
+            conn = _registry._get_conn()
+            if account:
+                conn.execute(
+                    "DELETE FROM operations_log WHERE status IN ('error','flood_wait','banned','frozen') AND account_name = ?",
+                    (account,),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM operations_log WHERE status IN ('error','flood_wait','banned','frozen')",
+                )
+            conn.commit()
+            return jsonify({"status": "ok"})
+
         return jsonify({"error": "unknown action"}), 400
 
     # --- API: failed requests ---
