@@ -410,6 +410,47 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
+        elif action == "git_pull":
+            try:
+                result = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd="/root/Egor_fix_python",
+                    capture_output=True, text=True, timeout=30,
+                )
+                return jsonify({
+                    "status": "ok",
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "returncode": result.returncode,
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        elif action == "deploy":
+            """git pull + restart service."""
+            try:
+                pull = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd="/root/Egor_fix_python",
+                    capture_output=True, text=True, timeout=30,
+                )
+                if pull.returncode != 0:
+                    return jsonify({
+                        "error": "git pull failed",
+                        "stdout": pull.stdout,
+                        "stderr": pull.stderr,
+                    }), 500
+                subprocess.Popen(
+                    ["systemctl", "restart", "telethon-platform"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                return jsonify({
+                    "status": "ok",
+                    "git_output": pull.stdout,
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         return jsonify({"error": "unknown action"}), 400
 
     # --- API: failed requests ---
