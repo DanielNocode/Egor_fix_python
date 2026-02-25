@@ -65,7 +65,12 @@ async def run_with_retry(coro_func, client: TelegramClient, *args, **kwargs):
                 attempt, config.MAX_RETRIES, type(e).__name__, e,
             )
             if attempt < config.MAX_RETRIES:
-                await reconnect_client(client)
+                try:
+                    await reconnect_client(client)
+                except Exception as rc_err:
+                    logger.error(
+                        "Reconnect failed on attempt %d: %s", attempt, rc_err,
+                    )
                 await asyncio.sleep(config.RETRY_DELAY)
         except Exception as e:
             if is_persistent_timestamp_error(e):
@@ -75,7 +80,12 @@ async def run_with_retry(coro_func, client: TelegramClient, *args, **kwargs):
                     attempt, config.MAX_RETRIES, e,
                 )
                 if attempt < config.MAX_RETRIES:
-                    await reconnect_client(client)
+                    try:
+                        await reconnect_client(client)
+                    except Exception as rc_err:
+                        logger.error(
+                            "Reconnect failed on attempt %d: %s", attempt, rc_err,
+                        )
                     await asyncio.sleep(config.RETRY_DELAY)
             else:
                 raise

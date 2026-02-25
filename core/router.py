@@ -146,7 +146,7 @@ class AccountRouter:
                 bridge.account_name, chat_id, operation, "flood_wait",
                 detail=f"FloodWait {secs}s",
             )
-        elif "banned" in str(error).lower() or "deactivated" in str(error).lower():
+        elif any(kw in str(error).lower() for kw in ("banned", "deactivated", "frozen")):
             bridge.mark_banned()
             self.registry.log_operation(
                 bridge.account_name, chat_id, operation, "banned",
