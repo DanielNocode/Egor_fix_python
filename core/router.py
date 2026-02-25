@@ -14,7 +14,7 @@ from typing import Optional
 from core.bridge import TelethonBridge
 from core.pool import AccountPool
 from core.registry import ChatRegistry
-from core.retry import is_flood_wait, flood_wait_seconds
+from core.retry import is_flood_wait, flood_wait_seconds, is_frozen_error
 
 import config
 
@@ -146,7 +146,13 @@ class AccountRouter:
                 bridge.account_name, chat_id, operation, "flood_wait",
                 detail=f"FloodWait {secs}s",
             )
-        elif any(kw in str(error).lower() for kw in ("banned", "deactivated", "frozen")):
+        elif is_frozen_error(error):
+            bridge.mark_frozen()
+            self.registry.log_operation(
+                bridge.account_name, chat_id, operation, "frozen",
+                detail=str(error),
+            )
+        elif "banned" in str(error).lower() or "deactivated" in str(error).lower():
             bridge.mark_banned()
             self.registry.log_operation(
                 bridge.account_name, chat_id, operation, "banned",

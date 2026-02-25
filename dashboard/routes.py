@@ -368,6 +368,16 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                     return jsonify({"status": "ok"})
             return jsonify({"error": "unknown bridge or not in flood"}), 400
 
+        elif action == "clear_frozen":
+            if account:
+                bridge = _pool.get(account)
+                if bridge and bridge.status == bridge.STATUS_FROZEN:
+                    bridge.error_count = 0
+                    bridge.last_error = None
+                    bridge.status = bridge.STATUS_HEALTHY
+                    return jsonify({"status": "ok"})
+            return jsonify({"error": "unknown bridge or not frozen"}), 400
+
         elif action == "restart":
             try:
                 subprocess.Popen(
@@ -386,6 +396,47 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 return jsonify({"status": "ok"})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        elif action == "git_pull":
+            try:
+                result = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd="/root/Egor_fix_python",
+                    capture_output=True, text=True, timeout=30,
+                )
+                return jsonify({
+                    "status": "ok",
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "returncode": result.returncode,
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        elif action == "deploy":
+            """git pull + restart service."""
+            try:
+                pull = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd="/root/Egor_fix_python",
+                    capture_output=True, text=True, timeout=30,
+                )
+                if pull.returncode != 0:
+                    return jsonify({
+                        "error": "git pull failed",
+                        "stdout": pull.stdout,
+                        "stderr": pull.stderr,
+                    }), 500
+                subprocess.Popen(
+                    ["systemctl", "restart", "telethon-platform"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                return jsonify({
+                    "status": "ok",
+                    "git_output": pull.stdout,
+                })
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
 
