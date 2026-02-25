@@ -379,6 +379,16 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
                     return jsonify({"status": "ok"})
             return jsonify({"error": "unknown bridge or not in flood"}), 400
 
+        elif action == "clear_frozen":
+            if account:
+                bridge = _pool.get(account)
+                if bridge and bridge.status == bridge.STATUS_FROZEN:
+                    bridge.error_count = 0
+                    bridge.last_error = None
+                    bridge.status = bridge.STATUS_HEALTHY
+                    return jsonify({"status": "ok"})
+            return jsonify({"error": "unknown bridge or not frozen"}), 400
+
         elif action == "restart":
             try:
                 subprocess.Popen(

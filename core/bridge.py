@@ -33,6 +33,7 @@ class TelethonBridge:
     STATUS_FLOOD = "flood_wait"
     STATUS_ERROR = "error"
     STATUS_BANNED = "banned"
+    STATUS_FROZEN = "frozen"
 
     def __init__(self, name: str, session: str, priority: int,
                  loop: asyncio.AbstractEventLoop,
@@ -138,6 +139,11 @@ class TelethonBridge:
         self.status = self.STATUS_BANNED
         self.last_error = "Account banned"
         logger.error("Bridge %s: BANNED", self.name)
+
+    def mark_frozen(self):
+        self.status = self.STATUS_FROZEN
+        self.last_error = "Account frozen (FrozenParticipantMissingError)"
+        logger.error("Bridge %s: FROZEN", self.name)
 
     def mark_success(self):
         self.error_count = 0
@@ -296,7 +302,18 @@ class TelethonBridge:
         """Бесконечный цикл: прогреваем кэш каждые CACHE_WARMUP_INTERVAL секунд."""
         while True:
             await asyncio.sleep(config.CACHE_WARMUP_INTERVAL)
+            # Не прогреваем кэш для заблокированных/замороженных bridge'ей
+            if self.status in (self.STATUS_BANNED, self.STATUS_FROZEN):
+                continue
             try:
                 await self.warmup_cache()
             except Exception as e:
-                logger.error("Bridge %s: periodic warmup failed: %s", self.name, e)
+                err_lower = str(e).lower()
+                if "frozen" in err_lower:
+                    self.mark_frozen()
+                elif "banned" in err_lower or "deactivated" in err_lower:
+                    self.mark_banned()
+                elif "disconnected" in err_lower and self.status in (self.STATUS_FROZEN, self.STATUS_BANNED):
+                    pass  # уже помечен, не спамим логи
+                else:
+                    logger.error("Bridge %s: periodic warmup failed: %s", self.name, e)

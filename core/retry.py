@@ -25,6 +25,13 @@ def is_persistent_timestamp_error(e: Exception) -> bool:
     return "persistenttimestamp" in name or "persistent timestamp" in text
 
 
+def is_frozen_error(e: Exception) -> bool:
+    """FrozenParticipantMissingError — аккаунт заморожен Telegram'ом."""
+    name = type(e).__name__.lower()
+    text = str(e).lower()
+    return "frozenparticipant" in name or "frozen" in text
+
+
 def is_flood_wait(e: Exception) -> bool:
     return type(e).__name__ == "FloodWaitError"
 
