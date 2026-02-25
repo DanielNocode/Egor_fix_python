@@ -244,22 +244,11 @@ def create_dashboard_app(pool, registry, router, loop) -> Flask:
             )
             backfilled += 1
 
-        # Проверяем: если чат есть в реестре, но НИ У КОГО в кэше — помечаем left
-        marked_left = 0
-        all_active = _registry.get_all_assignments(limit=10000)
-        for chat in all_active:
-            if chat["status"] != "active":
-                continue
-            if chat["chat_id"] not in seen_ids:
-                _registry.mark_left(chat["chat_id"])
-                marked_left += 1
-
         return jsonify({
             "status": "ok",
             "added": added,
             "updated": updated,
             "backfilled": backfilled,
-            "marked_left": marked_left,
             "total_seen": len(seen_ids),
         })
 
