@@ -206,14 +206,26 @@ async def _create_chat_impl(bridge: TelethonBridge, title: str,
         try:
             amo_user = await bridge.get_entity(config.AMO_OBSERVER_USERNAME)
             amo_input = types.InputUser(amo_user.id, amo_user.access_hash)
-            await bridge.client(functions.channels.InviteToChannelRequest(
+            invite_result = await bridge.client(functions.channels.InviteToChannelRequest(
                 channel=channel_peer, users=[amo_input],
             ))
-            debug["amo_invite"] = "ok"
+            # Check missing_invitees — users blocked by privacy settings
+            missing = getattr(invite_result, 'missing_invitees', [])
+            if missing:
+                debug["amo_invite"] = f"missing:{[getattr(m,'user_id','?') for m in missing]}"
+                logger.warning("AMO observer %s MISSING (privacy?) in chat %s: %s",
+                               config.AMO_OBSERVER_USERNAME, watched_id, missing)
+            else:
+                debug["amo_invite"] = "ok"
+                logger.info("AMO observer %s invited OK into chat %s (bridge=%s)",
+                            config.AMO_OBSERVER_USERNAME, watched_id, bridge.name)
         except Exception as e:
             debug["amo_invite"] = f"error:{e}"
-            logger.warning("Failed to invite AMO observer %s: %s",
-                           config.AMO_OBSERVER_USERNAME, e)
+            logger.warning("Failed to invite AMO observer %s into chat %s: %s",
+                           config.AMO_OBSERVER_USERNAME, watched_id, e)
+    else:
+        logger.info("AMO observer skip: username=%s, account=%s",
+                    config.AMO_OBSERVER_USERNAME, bridge.account_name)
 
     # 6) Invite link
     invite_link = await _export_invite(bridge, channel_peer) or None

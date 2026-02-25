@@ -130,6 +130,15 @@ class TelethonBridge:
     def mark_error(self, error: str):
         self.error_count += 1
         self.last_error = error
+        # Disconnected / frozen — сразу помечаем как error (failover сработает)
+        error_lower = error.lower()
+        if "disconnected" in error_lower or "frozen" in error_lower:
+            self.status = self.STATUS_ERROR
+            logger.error(
+                "Bridge %s: disconnected/frozen, marking as error immediately",
+                self.name,
+            )
+            return
         # После 10 ошибок подряд без успеха — помечаем как error
         if self.error_count >= 10:
             self.status = self.STATUS_ERROR
